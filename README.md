@@ -52,7 +52,7 @@ The project configuration follows the Kubernetes resource API structure:
 
 ```yaml
 apiVersion: devedge.infoblox.dev/v1alpha1
-kind: DEConfig
+kind: Config
 metadata:
   name: foo
   labels:

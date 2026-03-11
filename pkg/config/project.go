@@ -3,7 +3,7 @@
 // The configuration follows the Kubernetes resource API structure:
 //
 //	apiVersion: devedge.infoblox.dev/v1alpha1
-//	kind: DEConfig
+//	kind: Config
 //	metadata:
 //	  name: foo
 //	spec:
@@ -28,7 +28,7 @@ const (
 	// APIVersion is the current config API version.
 	APIVersion = "devedge.infoblox.dev/v1alpha1"
 	// Kind is the resource kind for project configs.
-	Kind = "DEConfig"
+	Kind = "Config"
 )
 
 // ProjectConfig represents a devedge.yaml project file following the

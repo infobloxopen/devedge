@@ -281,7 +281,7 @@ A project has a `devedge.yaml`:
 
 ```yaml
 apiVersion: devedge.infoblox.dev/v1alpha1
-kind: DEConfig
+kind: Config
 metadata:
   name: foo
 spec:
@@ -542,7 +542,7 @@ de k3d detach foo
 
 ```yaml
 apiVersion: devedge.infoblox.dev/v1alpha1
-kind: DEConfig
+kind: Config
 metadata:
   name: foo
 spec:

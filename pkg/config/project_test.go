@@ -8,7 +8,7 @@ import (
 func TestParseProject(t *testing.T) {
 	input := []byte(`
 apiVersion: devedge.infoblox.dev/v1alpha1
-kind: DEConfig
+kind: Config
 metadata:
   name: foo
   labels:
@@ -33,7 +33,7 @@ spec:
 	if cfg.APIVersion != "devedge.infoblox.dev/v1alpha1" {
 		t.Errorf("APIVersion = %q", cfg.APIVersion)
 	}
-	if cfg.Kind != "DEConfig" {
+	if cfg.Kind != "Config" {
 		t.Errorf("Kind = %q", cfg.Kind)
 	}
 	if cfg.Project() != "foo" {
@@ -55,7 +55,7 @@ spec:
 
 func TestParseProject_missing_apiVersion(t *testing.T) {
 	input := []byte(`
-kind: DEConfig
+kind: Config
 metadata:
   name: foo
 spec:
@@ -72,7 +72,7 @@ spec:
 func TestParseProject_missing_name(t *testing.T) {
 	input := []byte(`
 apiVersion: devedge.infoblox.dev/v1alpha1
-kind: DEConfig
+kind: Config
 metadata: {}
 spec:
   routes:
