@@ -51,8 +51,8 @@ de k3d ...          (alias for de cluster)
 The project configuration follows the Kubernetes resource API structure:
 
 ```yaml
-apiVersion: devedge.io/v1alpha1
-kind: EdgeConfig
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: DEConfig
 metadata:
   name: foo
   labels:

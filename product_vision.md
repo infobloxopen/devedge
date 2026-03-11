@@ -280,8 +280,8 @@ Devedge:
 A project has a `devedge.yaml`:
 
 ```yaml
-apiVersion: devedge.io/v1alpha1
-kind: EdgeConfig
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: DEConfig
 metadata:
   name: foo
 spec:
@@ -541,8 +541,8 @@ de k3d detach foo
 ## Example project config
 
 ```yaml
-apiVersion: devedge.io/v1alpha1
-kind: EdgeConfig
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: DEConfig
 metadata:
   name: foo
 spec:
