@@ -11,6 +11,7 @@ all: test build
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/de ./cmd/de
 	go build -ldflags "$(LDFLAGS)" -o bin/devedged ./cmd/devedged
+	go build -ldflags "$(LDFLAGS)" -o bin/devedge-dns-webhook ./cmd/devedge-dns-webhook
 
 test:
 	go test ./...

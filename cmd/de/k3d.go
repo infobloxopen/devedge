@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -15,7 +19,13 @@ func k3dCmd() *cobra.Command {
 		Use:   "k3d",
 		Short: "Manage k3d cluster integrations",
 	}
-	cmd.AddCommand(k3dAttachCmd(), k3dDetachCmd(), k3dLsCmd())
+	cmd.AddCommand(
+		k3dAttachCmd(),
+		k3dDetachCmd(),
+		k3dLsCmd(),
+		k3dBootstrapCmd(),
+		k3dWatchCmd(),
+	)
 	return cmd
 }
 
@@ -30,7 +40,6 @@ func k3dAttachCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cluster := args[0]
 
-			// Auto-detect ingress port if not specified.
 			if ingress == "" {
 				port, err := k3d.FindIngressPort(cluster)
 				if err != nil {
@@ -111,4 +120,82 @@ func k3dLsCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func k3dBootstrapCmd() *cobra.Command {
+	var ctx, ns string
+
+	cmd := &cobra.Command{
+		Use:   "bootstrap CLUSTER",
+		Short: "Set up a k3d cluster for seamless devedge integration",
+		Long: `Bootstrap installs the devedge CA, cert-manager issuer, and
+external-dns webhook into a k3d cluster. After bootstrapping, any Ingress
+object with standard cert-manager and external-dns annotations will
+automatically get locally-trusted TLS and host-resolvable DNS names.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Printf("Bootstrapping cluster %q for devedge...\n", args[0])
+			return k3d.Bootstrap(k3d.BootstrapOptions{
+				ClusterName: args[0],
+				Context:     ctx,
+				Namespace:   ns,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&ctx, "context", "", "kubectl context (default: k3d-CLUSTER)")
+	cmd.Flags().StringVar(&ns, "namespace", "cert-manager", "namespace for CA secret")
+	return cmd
+}
+
+func k3dWatchCmd() *cobra.Command {
+	var kubectx, ns, ingressPort, devedgeURL string
+
+	cmd := &cobra.Command{
+		Use:   "watch CLUSTER",
+		Short: "Watch Ingress objects and auto-register with devedge",
+		Long: `Watch Kubernetes Ingress objects annotated with
+devedge.io/expose=true and automatically register/deregister their
+hostnames with the devedge daemon. This is a lightweight alternative
+to running the full external-dns stack.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cluster := args[0]
+			if kubectx == "" {
+				kubectx = "k3d-" + cluster
+			}
+			if devedgeURL == "" {
+				devedgeURL = "http://127.0.0.1:" + daemon.DefaultTCPAddr()[len("127.0.0.1:"):]
+			}
+
+			// Auto-detect ingress port.
+			if ingressPort == "" {
+				port, err := k3d.FindIngressPort(cluster)
+				if err != nil {
+					return fmt.Errorf("auto-detect ingress port: %w", err)
+				}
+				ingressPort = port
+			}
+
+			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+			ctx, cancel := signal.NotifyContext(context.Background(),
+				os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			fmt.Printf("Watching Ingress objects in context %q (Ctrl-C to stop)\n", kubectx)
+
+			return k3d.WatchIngresses(ctx, k3d.IngressWatcherConfig{
+				Context:     kubectx,
+				Namespace:   ns,
+				DevedgeURL:  devedgeURL,
+				IngressPort: ingressPort,
+				Logger:      logger,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&kubectx, "context", "", "kubectl context (default: k3d-CLUSTER)")
+	cmd.Flags().StringVar(&ns, "namespace", "", "namespace to watch (default: all)")
+	cmd.Flags().StringVar(&ingressPort, "ingress-port", "", "host port for k3d ingress (auto-detected)")
+	cmd.Flags().StringVar(&devedgeURL, "devedge-url", "", "devedge daemon URL")
+	return cmd
 }
