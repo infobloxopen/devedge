@@ -93,6 +93,10 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/infobloxopen/devedge
     description: "Local development edge router and name registry"
+    binaries:
+      - de
+      - devedged
+      - devedge-dns-webhook
     hooks:
       post:
         install: |
