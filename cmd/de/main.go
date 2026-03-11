@@ -43,6 +43,8 @@ func rootCmd() *cobra.Command {
 		statusCmd(),
 		inspectCmd(),
 		projectCmd(),
+		k3dCmd(),
+		uiCmd(),
 	)
 
 	return root

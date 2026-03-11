@@ -27,6 +27,7 @@ func NewAPI(reg *registry.Registry, logger *slog.Logger) *API {
 	a.mux.HandleFunc("DELETE /v1/routes/{host}", a.deregisterRoute)
 	a.mux.HandleFunc("DELETE /v1/projects/{project}", a.deregisterProject)
 	a.mux.HandleFunc("GET /v1/status", a.status)
+	addUIRoutes(a.mux, reg)
 	return a
 }
 
