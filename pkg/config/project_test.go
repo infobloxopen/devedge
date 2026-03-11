@@ -7,17 +7,22 @@ import (
 
 func TestParseProject(t *testing.T) {
 	input := []byte(`
-version: 1
-project: foo
-defaults:
-  ttl: 30s
-  tls: true
-routes:
-  - host: web.foo.dev.test
-    upstream: http://127.0.0.1:3000
-  - host: api.foo.dev.test
-    upstream: http://127.0.0.1:8081
-    mode: host-header-pass
+apiVersion: devedge.io/v1alpha1
+kind: EdgeConfig
+metadata:
+  name: foo
+  labels:
+    team: platform
+spec:
+  defaults:
+    ttl: 30s
+    tls: true
+  routes:
+    - host: web.foo.dev.test
+      upstream: http://127.0.0.1:3000
+    - host: api.foo.dev.test
+      upstream: http://127.0.0.1:8081
+      mode: host-header-pass
 `)
 
 	cfg, err := ParseProject(input)
@@ -25,44 +30,87 @@ routes:
 		t.Fatalf("ParseProject: %v", err)
 	}
 
-	if cfg.Project != "foo" {
-		t.Errorf("Project = %q, want foo", cfg.Project)
+	if cfg.APIVersion != "devedge.io/v1alpha1" {
+		t.Errorf("APIVersion = %q", cfg.APIVersion)
 	}
-	if cfg.Version != 1 {
-		t.Errorf("Version = %d, want 1", cfg.Version)
+	if cfg.Kind != "EdgeConfig" {
+		t.Errorf("Kind = %q", cfg.Kind)
 	}
-	if len(cfg.Routes) != 2 {
-		t.Fatalf("Routes len = %d, want 2", len(cfg.Routes))
+	if cfg.Project() != "foo" {
+		t.Errorf("Project() = %q, want foo", cfg.Project())
 	}
-	if cfg.Routes[0].Host != "web.foo.dev.test" {
-		t.Errorf("Routes[0].Host = %q", cfg.Routes[0].Host)
+	if cfg.Metadata.Labels["team"] != "platform" {
+		t.Errorf("Labels = %v", cfg.Metadata.Labels)
 	}
-	if cfg.Routes[1].Mode != "host-header-pass" {
-		t.Errorf("Routes[1].Mode = %q", cfg.Routes[1].Mode)
+	if len(cfg.Spec.Routes) != 2 {
+		t.Fatalf("Routes len = %d, want 2", len(cfg.Spec.Routes))
+	}
+	if cfg.Spec.Routes[0].Host != "web.foo.dev.test" {
+		t.Errorf("Routes[0].Host = %q", cfg.Spec.Routes[0].Host)
+	}
+	if cfg.Spec.Routes[1].Mode != "host-header-pass" {
+		t.Errorf("Routes[1].Mode = %q", cfg.Spec.Routes[1].Mode)
 	}
 }
 
-func TestParseProject_missing_project(t *testing.T) {
-	input := []byte(`version: 1
-routes:
-  - host: x.dev.test
-    upstream: http://127.0.0.1:1
+func TestParseProject_missing_apiVersion(t *testing.T) {
+	input := []byte(`
+kind: EdgeConfig
+metadata:
+  name: foo
+spec:
+  routes:
+    - host: x.dev.test
+      upstream: http://127.0.0.1:1
 `)
 	_, err := ParseProject(input)
 	if err == nil {
-		t.Fatal("expected error for missing project")
+		t.Fatal("expected error for missing apiVersion")
+	}
+}
+
+func TestParseProject_missing_name(t *testing.T) {
+	input := []byte(`
+apiVersion: devedge.io/v1alpha1
+kind: EdgeConfig
+metadata: {}
+spec:
+  routes:
+    - host: x.dev.test
+      upstream: http://127.0.0.1:1
+`)
+	_, err := ParseProject(input)
+	if err == nil {
+		t.Fatal("expected error for missing metadata.name")
+	}
+}
+
+func TestParseProject_wrong_kind(t *testing.T) {
+	input := []byte(`
+apiVersion: devedge.io/v1alpha1
+kind: Deployment
+metadata:
+  name: foo
+spec:
+  routes: []
+`)
+	_, err := ParseProject(input)
+	if err == nil {
+		t.Fatal("expected error for wrong kind")
 	}
 }
 
 func TestToRoutes(t *testing.T) {
 	cfg := &ProjectConfig{
-		Project: "foo",
-		Defaults: ProjectDefaults{
-			TTL: "30s",
-		},
-		Routes: []RouteEntry{
-			{Host: "web.foo.dev.test", Upstream: "http://127.0.0.1:3000"},
-			{Host: "api.foo.dev.test", Upstream: "http://127.0.0.1:4000"},
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   ObjectMeta{Name: "foo"},
+		Spec: ProjectSpec{
+			Defaults: RouteDefaults{TTL: "30s"},
+			Routes: []RouteEntry{
+				{Host: "web.foo.dev.test", Upstream: "http://127.0.0.1:3000"},
+				{Host: "api.foo.dev.test", Upstream: "http://127.0.0.1:4000"},
+			},
 		},
 	}
 

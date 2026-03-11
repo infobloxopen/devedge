@@ -255,8 +255,8 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 
 			// Heartbeat loop — renew leases at half the TTL interval.
 			interval := 15 * time.Second
-			if cfg.Defaults.TTL != "" {
-				if d, err := time.ParseDuration(cfg.Defaults.TTL); err == nil && d > 0 {
+			if cfg.Spec.Defaults.TTL != "" {
+				if d, err := time.ParseDuration(cfg.Spec.Defaults.TTL); err == nil && d > 0 {
 					interval = d / 2
 				}
 			}
@@ -296,7 +296,7 @@ func projectDownCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("project name required (pass as argument or use devedge.yaml)")
 				}
-				project = cfg.Project
+				project = cfg.Project()
 			}
 
 			c := newClient()

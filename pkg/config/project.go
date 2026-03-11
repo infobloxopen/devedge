@@ -1,4 +1,18 @@
 // Package config handles parsing of devedge project configuration files.
+//
+// The configuration follows the Kubernetes resource API structure:
+//
+//	apiVersion: devedge.io/v1alpha1
+//	kind: EdgeConfig
+//	metadata:
+//	  name: foo
+//	spec:
+//	  defaults:
+//	    ttl: 30s
+//	    tls: true
+//	  routes:
+//	    - host: web.foo.dev.test
+//	      upstream: http://127.0.0.1:3000
 package config
 
 import (
@@ -10,18 +24,40 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ProjectConfig represents a devedge.yaml project file.
+const (
+	// APIVersion is the current config API version.
+	APIVersion = "devedge.io/v1alpha1"
+	// Kind is the resource kind for project configs.
+	Kind = "EdgeConfig"
+)
+
+// ProjectConfig represents a devedge.yaml project file following the
+// Kubernetes resource API structure.
 type ProjectConfig struct {
-	Version  int             `yaml:"version"`
-	Project  string          `yaml:"project"`
-	Defaults ProjectDefaults `yaml:"defaults"`
-	Routes   []RouteEntry    `yaml:"routes"`
+	APIVersion string          `yaml:"apiVersion"`
+	Kind       string          `yaml:"kind"`
+	Metadata   ObjectMeta      `yaml:"metadata"`
+	Spec       ProjectSpec     `yaml:"spec"`
 }
 
-// ProjectDefaults holds default values for routes in the project.
-type ProjectDefaults struct {
-	TTL string `yaml:"ttl"`
-	TLS bool   `yaml:"tls"`
+// ObjectMeta follows the Kubernetes metadata convention.
+type ObjectMeta struct {
+	Name        string            `yaml:"name"`
+	Namespace   string            `yaml:"namespace,omitempty"`
+	Labels      map[string]string `yaml:"labels,omitempty"`
+	Annotations map[string]string `yaml:"annotations,omitempty"`
+}
+
+// ProjectSpec holds the desired state for the project's edge configuration.
+type ProjectSpec struct {
+	Defaults RouteDefaults `yaml:"defaults,omitempty"`
+	Routes   []RouteEntry  `yaml:"routes"`
+}
+
+// RouteDefaults holds default values applied to all routes in the project.
+type RouteDefaults struct {
+	TTL string `yaml:"ttl,omitempty"`
+	TLS bool   `yaml:"tls,omitempty"`
 }
 
 // RouteEntry represents a single route in the project config.
@@ -46,32 +82,46 @@ func ParseProject(data []byte) (*ProjectConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse project config: %w", err)
 	}
-	if cfg.Project == "" {
-		return nil, fmt.Errorf("project config: 'project' field is required")
+
+	// Validate required fields.
+	if cfg.APIVersion == "" {
+		return nil, fmt.Errorf("project config: 'apiVersion' is required (use %q)", APIVersion)
 	}
-	if cfg.Version == 0 {
-		cfg.Version = 1
+	if cfg.Kind == "" {
+		return nil, fmt.Errorf("project config: 'kind' is required (use %q)", Kind)
 	}
+	if cfg.Kind != Kind {
+		return nil, fmt.Errorf("project config: unsupported kind %q (expected %q)", cfg.Kind, Kind)
+	}
+	if cfg.Metadata.Name == "" {
+		return nil, fmt.Errorf("project config: 'metadata.name' is required")
+	}
+
 	return &cfg, nil
+}
+
+// Project returns the project name from metadata.
+func (c *ProjectConfig) Project() string {
+	return c.Metadata.Name
 }
 
 // ToRoutes converts the project config into domain Route objects.
 func (c *ProjectConfig) ToRoutes() ([]types.Route, error) {
 	var ttl time.Duration
-	if c.Defaults.TTL != "" {
+	if c.Spec.Defaults.TTL != "" {
 		var err error
-		ttl, err = time.ParseDuration(c.Defaults.TTL)
+		ttl, err = time.ParseDuration(c.Spec.Defaults.TTL)
 		if err != nil {
-			return nil, fmt.Errorf("parse default TTL %q: %w", c.Defaults.TTL, err)
+			return nil, fmt.Errorf("parse default TTL %q: %w", c.Spec.Defaults.TTL, err)
 		}
 	}
 
-	routes := make([]types.Route, 0, len(c.Routes))
-	for _, entry := range c.Routes {
+	routes := make([]types.Route, 0, len(c.Spec.Routes))
+	for _, entry := range c.Spec.Routes {
 		routes = append(routes, types.Route{
 			Host:     entry.Host,
 			Upstream: entry.Upstream,
-			Project:  c.Project,
+			Project:  c.Metadata.Name,
 			Source:   "project-file",
 			TTL:      ttl,
 		})

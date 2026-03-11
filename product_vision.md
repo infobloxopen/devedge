@@ -280,12 +280,16 @@ Devedge:
 A project has a `devedge.yaml`:
 
 ```yaml
-project: foo
-routes:
-  - host: web.foo.dev.test
-    upstream: http://127.0.0.1:3000
-  - host: api.foo.dev.test
-    upstream: http://127.0.0.1:4000
+apiVersion: devedge.io/v1alpha1
+kind: EdgeConfig
+metadata:
+  name: foo
+spec:
+  routes:
+    - host: web.foo.dev.test
+      upstream: http://127.0.0.1:3000
+    - host: api.foo.dev.test
+      upstream: http://127.0.0.1:4000
 ```
 
 Then:
@@ -537,33 +541,26 @@ de k3d detach foo
 ## Example project config
 
 ```yaml
-version: 1
-project: foo
+apiVersion: devedge.io/v1alpha1
+kind: EdgeConfig
+metadata:
+  name: foo
+spec:
+  defaults:
+    ttl: 30s
+    tls: true
 
-defaults:
-  ttl: 30s
-  tls: true
+  routes:
+    - host: web.foo.dev.test
+      upstream: http://127.0.0.1:3000
 
-routes:
-  - host: web.foo.dev.test
-    upstream: http://127.0.0.1:3000
+    - host: api.foo.dev.test
+      upstream: http://127.0.0.1:8081
+      mode: host-header-pass
 
-  - host: api.foo.dev.test
-    upstream: http://127.0.0.1:8081
-    mode: host-header-pass
-
-  - host: grafana.foo.dev.test
-    upstream: http://127.0.0.1:8081
-    mode: host-header-pass
-
-k3d:
-  cluster: foo
-  ingress: http://127.0.0.1:8081
-  sync:
-    from:
-      - ingress
-      - ingressroute
-    selector: "devedge.io/expose=true"
+    - host: grafana.foo.dev.test
+      upstream: http://127.0.0.1:8081
+      mode: host-header-pass
 ```
 
 ## UI
