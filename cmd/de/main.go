@@ -67,26 +67,40 @@ func versionCmd() *cobra.Command {
 }
 
 func registerCmd() *cobra.Command {
-	var project, owner, ttl string
+	var project, owner, ttl, protocol string
+	var backendTLS bool
 
 	cmd := &cobra.Command{
 		Use:   "register HOST UPSTREAM",
 		Short: "Register a route",
-		Args:  cobra.ExactArgs(2),
+		Long: `Register a route. For HTTP services, UPSTREAM is a URL like
+http://127.0.0.1:3000. For TCP services (databases, gRPC, binary protocols),
+use --protocol tcp and specify the backend as host:port.
+
+Examples:
+  de register api.foo.dev.test http://127.0.0.1:3000
+  de register postgres.foo.dev.test 127.0.0.1:5432 --protocol tcp
+  de register redis.foo.dev.test 127.0.0.1:6379 --protocol tcp
+  de register secure-db.foo.dev.test 127.0.0.1:5432 --protocol tcp --backend-tls`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
 			return c.Register(context.Background(), daemon.RegisterRequest{
-				Host:     args[0],
-				Upstream: args[1],
-				Project:  project,
-				Owner:    owner,
-				TTL:      ttl,
+				Host:       args[0],
+				Upstream:   args[1],
+				Protocol:   protocol,
+				BackendTLS: backendTLS,
+				Project:    project,
+				Owner:      owner,
+				TTL:        ttl,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "project name")
 	cmd.Flags().StringVar(&owner, "owner", "", "owner identifier")
 	cmd.Flags().StringVar(&ttl, "ttl", "", "lease TTL (e.g. 30s)")
+	cmd.Flags().StringVar(&protocol, "protocol", "", "routing protocol: http (default) or tcp")
+	cmd.Flags().BoolVar(&backendTLS, "backend-tls", false, "use TLS to connect to upstream")
 	return cmd
 }
 
@@ -155,9 +169,10 @@ func lsCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "HOST\tUPSTREAM\tPROJECT\tSOURCE")
+			fmt.Fprintln(w, "HOST\tUPSTREAM\tPROTO\tPROJECT\tSOURCE")
 			for _, r := range routes {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Host, r.Upstream, r.Project, r.Source)
+				proto := string(r.EffectiveProtocol())
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Host, r.Upstream, proto, r.Project, r.Source)
 			}
 			return w.Flush()
 		},

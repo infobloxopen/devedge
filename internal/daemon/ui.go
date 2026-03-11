@@ -15,6 +15,7 @@ func addUIRoutes(mux *http.ServeMux, reg *registry.Registry) {
 		type viewRoute struct {
 			Host      string
 			Upstream  string
+			Protocol  string
 			Project   string
 			Source    string
 			Owner     string
@@ -32,6 +33,7 @@ func addUIRoutes(mux *http.ServeMux, reg *registry.Registry) {
 			data = append(data, viewRoute{
 				Host:      rt.Host,
 				Upstream:  rt.Upstream,
+				Protocol:  string(rt.EffectiveProtocol()),
 				Project:   rt.Project,
 				Source:    rt.Source,
 				Owner:     rt.Owner,
@@ -73,6 +75,7 @@ var uiTemplate = template.Must(template.New("ui").Parse(`<!DOCTYPE html>
 <tr>
   <th>Host</th>
   <th>Upstream</th>
+  <th>Proto</th>
   <th>Project</th>
   <th>Source</th>
   <th>Owner</th>
@@ -86,6 +89,7 @@ var uiTemplate = template.Must(template.New("ui").Parse(`<!DOCTYPE html>
 <tr>
   <td><code>{{.Host}}</code></td>
   <td><code>{{.Upstream}}</code></td>
+  <td><span class="badge badge-source">{{.Protocol}}</span></td>
   <td>{{if .Project}}<span class="badge badge-project">{{.Project}}</span>{{end}}</td>
   <td>{{if .Source}}<span class="badge badge-source">{{.Source}}</span>{{end}}</td>
   <td>{{.Owner}}</td>

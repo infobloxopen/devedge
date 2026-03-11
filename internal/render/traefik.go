@@ -4,6 +4,7 @@ package render
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,17 @@ func safeName(host string) string {
 }
 
 // TraefikRoute generates the YAML content for a single route's Traefik
-// dynamic configuration.
+// dynamic configuration. HTTP routes use Host-header matching; TCP routes
+// use SNI matching with TLS termination.
 func TraefikRoute(r types.Route) string {
+	if r.EffectiveProtocol() == types.ProtocolTCP {
+		return traefikTCPRoute(r)
+	}
+	return traefikHTTPRoute(r)
+}
+
+// traefikHTTPRoute generates config for an HTTP/HTTPS route.
+func traefikHTTPRoute(r types.Route) string {
 	name := safeName(r.Host)
 	return fmt.Sprintf(`http:
   routers:
@@ -34,6 +44,47 @@ func TraefikRoute(r types.Route) string {
         servers:
           - url: "%[4]s"
 `, name, name, "`"+r.Host+"`", r.Upstream)
+}
+
+// traefikTCPRoute generates config for a TCP route with SNI-based TLS
+// termination on the frontend and raw TCP forwarding to the backend.
+func traefikTCPRoute(r types.Route) string {
+	name := safeName(r.Host)
+	addr := normalizeTCPAddress(r.Upstream)
+
+	tlsBlock := "      tls: {}"
+	if r.BackendTLS {
+		tlsBlock = `      tls:
+        passthrough: true`
+	}
+
+	return fmt.Sprintf(`tcp:
+  routers:
+    %s:
+      rule: "HostSNI(%[3]s)"
+      service: %[2]s-svc
+      entryPoints:
+        - websecure
+%[5]s
+  services:
+    %[2]s-svc:
+      loadBalancer:
+        servers:
+          - address: "%[4]s"
+`, name, name, "`"+r.Host+"`", addr, tlsBlock)
+}
+
+// normalizeTCPAddress ensures a TCP upstream is in host:port format.
+// Strips any scheme prefix (tcp://, etc.) since Traefik TCP services
+// expect bare host:port.
+func normalizeTCPAddress(upstream string) string {
+	// If it looks like a URL with a scheme, parse and extract host.
+	if strings.Contains(upstream, "://") {
+		if u, err := url.Parse(upstream); err == nil {
+			return u.Host
+		}
+	}
+	return upstream
 }
 
 // WriteRouteFile atomically writes a Traefik dynamic config file for a route

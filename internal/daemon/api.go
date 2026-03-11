@@ -38,11 +38,13 @@ func (a *API) Handler() http.Handler {
 
 // RegisterRequest is the JSON body for route registration.
 type RegisterRequest struct {
-	Host     string `json:"host"`
-	Upstream string `json:"upstream"`
-	Project  string `json:"project,omitempty"`
-	Owner    string `json:"owner,omitempty"`
-	TTL      string `json:"ttl,omitempty"`
+	Host       string `json:"host"`
+	Upstream   string `json:"upstream"`
+	Protocol   string `json:"protocol,omitempty"`    // "http" (default) or "tcp"
+	BackendTLS bool   `json:"backend_tls,omitempty"` // TLS to upstream
+	Project    string `json:"project,omitempty"`
+	Owner      string `json:"owner,omitempty"`
+	TTL        string `json:"ttl,omitempty"`
 }
 
 func (a *API) listRoutes(w http.ResponseWriter, r *http.Request) {
@@ -72,11 +74,13 @@ func (a *API) registerRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	route := types.Route{
-		Host:     req.Host,
-		Upstream: req.Upstream,
-		Project:  req.Project,
-		Owner:    req.Owner,
-		Source:   "api",
+		Host:       req.Host,
+		Upstream:   req.Upstream,
+		Protocol:   types.Protocol(req.Protocol),
+		BackendTLS: req.BackendTLS,
+		Project:    req.Project,
+		Owner:      req.Owner,
+		Source:     "api",
 	}
 
 	if req.TTL != "" {

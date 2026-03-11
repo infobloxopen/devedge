@@ -56,3 +56,21 @@ func TestRoute_IsExpired(t *testing.T) {
 		})
 	}
 }
+
+func TestEffectiveProtocol(t *testing.T) {
+	tests := []struct {
+		protocol Protocol
+		want     Protocol
+	}{
+		{"", ProtocolHTTP},
+		{ProtocolHTTP, ProtocolHTTP},
+		{ProtocolTCP, ProtocolTCP},
+		{"unknown", ProtocolHTTP},
+	}
+	for _, tt := range tests {
+		r := Route{Protocol: tt.protocol}
+		if got := r.EffectiveProtocol(); got != tt.want {
+			t.Errorf("EffectiveProtocol(%q) = %q, want %q", tt.protocol, got, tt.want)
+		}
+	}
+}

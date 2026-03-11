@@ -62,9 +62,11 @@ type RouteDefaults struct {
 
 // RouteEntry represents a single route in the project config.
 type RouteEntry struct {
-	Host     string `yaml:"host"`
-	Upstream string `yaml:"upstream"`
-	Mode     string `yaml:"mode,omitempty"`
+	Host       string `yaml:"host"`
+	Upstream   string `yaml:"upstream"`
+	Protocol   string `yaml:"protocol,omitempty"`   // "http" (default) or "tcp"
+	BackendTLS bool   `yaml:"backendTLS,omitempty"` // TLS to upstream
+	Mode       string `yaml:"mode,omitempty"`
 }
 
 // LoadProject reads and parses a devedge.yaml file.
@@ -119,11 +121,13 @@ func (c *ProjectConfig) ToRoutes() ([]types.Route, error) {
 	routes := make([]types.Route, 0, len(c.Spec.Routes))
 	for _, entry := range c.Spec.Routes {
 		routes = append(routes, types.Route{
-			Host:     entry.Host,
-			Upstream: entry.Upstream,
-			Project:  c.Metadata.Name,
-			Source:   "project-file",
-			TTL:      ttl,
+			Host:       entry.Host,
+			Upstream:   entry.Upstream,
+			Protocol:   types.Protocol(entry.Protocol),
+			BackendTLS: entry.BackendTLS,
+			Project:    c.Metadata.Name,
+			Source:     "project-file",
+			TTL:        ttl,
 		})
 	}
 	return routes, nil
