@@ -48,7 +48,8 @@ func rootCmd() *cobra.Command {
 		statusCmd(),
 		inspectCmd(),
 		projectCmd(),
-		k3dCmd(),
+		clusterCmd(),
+		k3dAliasCmd(),
 		uiCmd(),
 	)
 
