@@ -1,0 +1,84 @@
+version: 2
+
+project_name: devedge
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: de
+    main: ./cmd/de
+    binary: de
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/infobloxopen/devedge/internal/version.Version={{.Version}}
+      - -X github.com/infobloxopen/devedge/internal/version.Commit={{.ShortCommit}}
+
+  - id: devedged
+    main: ./cmd/devedged
+    binary: devedged
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/infobloxopen/devedge/internal/version.Version={{.Version}}
+      - -X github.com/infobloxopen/devedge/internal/version.Commit={{.ShortCommit}}
+
+  - id: devedge-dns-webhook
+    main: ./cmd/devedge-dns-webhook
+    binary: devedge-dns-webhook
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/infobloxopen/devedge/internal/version.Version={{.Version}}
+      - -X github.com/infobloxopen/devedge/internal/version.Commit={{.ShortCommit}}
+
+archives:
+  - id: default
+    builds:
+      - de
+      - devedged
+      - devedge-dns-webhook
+    name_template: "devedge_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: infobloxopen
+    name: devedge
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
