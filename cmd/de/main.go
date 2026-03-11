@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -39,6 +43,7 @@ func rootCmd() *cobra.Command {
 		doctorCmd(),
 		registerCmd(),
 		unregisterCmd(),
+		renewCmd(),
 		lsCmd(),
 		statusCmd(),
 		inspectCmd(),
@@ -92,6 +97,34 @@ func unregisterCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
 			return c.Deregister(context.Background(), args[0])
+		},
+	}
+}
+
+func renewCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "renew HOST",
+		Short: "Renew a route's lease",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := newClient()
+			// Lookup the current route and re-register it to renew the lease.
+			route, err := c.Lookup(context.Background(), args[0])
+			if err != nil {
+				return fmt.Errorf("lookup %s: %w", args[0], err)
+			}
+			err = c.Register(context.Background(), daemon.RegisterRequest{
+				Host:     route.Host,
+				Upstream: route.Upstream,
+				Project:  route.Project,
+				Owner:    route.Owner,
+				TTL:      route.TTL.String(),
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("renewed %s\n", args[0])
+			return nil
 		},
 	}
 }
@@ -178,10 +211,16 @@ func projectCmd() *cobra.Command {
 
 func projectUpCmd() *cobra.Command {
 	var file string
+	var watch bool
 
 	cmd := &cobra.Command{
 		Use:   "up",
 		Short: "Register all routes from devedge.yaml",
+		Long: `Register all routes from devedge.yaml.
+
+With --watch, the command stays running and sends heartbeats to renew
+leases. This keeps routes alive for as long as the project is active.
+Press Ctrl-C to stop and let leases expire naturally.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.LoadProject(file)
 			if err != nil {
@@ -193,23 +232,49 @@ func projectUpCmd() *cobra.Command {
 			}
 
 			c := newClient()
+			var reqs []daemon.RegisterRequest
 			for _, r := range routes {
-				err := c.Register(context.Background(), daemon.RegisterRequest{
+				req := daemon.RegisterRequest{
 					Host:     r.Host,
 					Upstream: r.Upstream,
 					Project:  r.Project,
 					Owner:    "project-file",
 					TTL:      r.TTL.String(),
-				})
-				if err != nil {
+				}
+				if err := c.Register(context.Background(), req); err != nil {
 					return fmt.Errorf("register %s: %w", r.Host, err)
 				}
 				fmt.Printf("registered %s -> %s\n", r.Host, r.Upstream)
+				reqs = append(reqs, req)
 			}
+
+			if !watch {
+				return nil
+			}
+
+			// Heartbeat loop — renew leases at half the TTL interval.
+			interval := 15 * time.Second
+			if cfg.Defaults.TTL != "" {
+				if d, err := time.ParseDuration(cfg.Defaults.TTL); err == nil && d > 0 {
+					interval = d / 2
+				}
+			}
+
+			fmt.Printf("Watching with heartbeat every %s (Ctrl-C to stop)\n", interval)
+			ctx, cancel := signal.NotifyContext(context.Background(),
+				os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			c.Heartbeat(ctx, reqs, interval, logger)
+
+			// On exit, routes will expire naturally via TTL.
+			fmt.Println("Stopped. Routes will expire when their TTL elapses.")
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "devedge.yaml", "project config file")
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "stay running and send lease heartbeats")
 	return cmd
 }
 

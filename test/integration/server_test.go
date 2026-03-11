@@ -31,6 +31,7 @@ func TestServerIntegration(t *testing.T) {
 		daemon.WithConfigDir(configDir),
 		daemon.WithServerLogger(logger),
 		daemon.WithHostsPath(hostsFile),
+		daemon.WithTCPAddr("127.0.0.1:0"), // random port for testing
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -149,10 +150,15 @@ func TestServerIntegration_raw(t *testing.T) {
 	configDir := filepath.Join(tmpDir, "dynamic")
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	hostsFile2 := filepath.Join(tmpDir, "hosts2")
+	os.WriteFile(hostsFile2, []byte("127.0.0.1\tlocalhost\n"), 0644)
+
 	srv := daemon.NewServer(
 		daemon.WithSocketPath(socketPath),
 		daemon.WithConfigDir(configDir),
 		daemon.WithServerLogger(logger),
+		daemon.WithTCPAddr("127.0.0.1:0"),
+		daemon.WithHostsPath(hostsFile2),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
