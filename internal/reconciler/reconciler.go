@@ -1,24 +1,27 @@
 // Package reconciler watches registry events and synchronizes the Traefik
-// dynamic configuration directory and /etc/hosts to match the desired state.
+// dynamic configuration directory, /etc/hosts, and TLS certificates to match
+// the desired state.
 package reconciler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
-	"fmt"
-	"os"
-
+	"github.com/infobloxopen/devedge/internal/certs"
 	"github.com/infobloxopen/devedge/internal/dns"
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/internal/render"
 )
 
-// Reconciler synchronizes route state to Traefik config files and hosts entries.
+// Reconciler synchronizes route state to Traefik config files, hosts entries,
+// and TLS certificates.
 type Reconciler struct {
 	configDir string
 	hostsPath string
+	certMgr   *certs.Manager
 	source    *registry.Registry
 	logger    *slog.Logger
 	sweepInt  time.Duration
@@ -42,6 +45,11 @@ func WithHostsPath(p string) Option {
 	return func(r *Reconciler) { r.hostsPath = p }
 }
 
+// WithCertManager enables certificate management during reconciliation.
+func WithCertManager(m *certs.Manager) Option {
+	return func(r *Reconciler) { r.certMgr = m }
+}
+
 // New creates a Reconciler targeting the given config directory.
 func New(configDir string, source *registry.Registry, opts ...Option) *Reconciler {
 	rec := &Reconciler{
@@ -56,8 +64,8 @@ func New(configDir string, source *registry.Registry, opts ...Option) *Reconcile
 	return rec
 }
 
-// Sync performs a single reconciliation pass: writes Traefik config files and
-// updates /etc/hosts for all active routes, removing stale entries.
+// Sync performs a single reconciliation pass: writes Traefik config files,
+// updates /etc/hosts, and ensures TLS certificates cover all active hostnames.
 func (r *Reconciler) Sync() error {
 	routes := r.source.List()
 	r.logger.Info("reconciling", "routes", len(routes))
@@ -70,14 +78,20 @@ func (r *Reconciler) Sync() error {
 		return err
 	}
 
+	hostnames := make([]string, len(routes))
+	for i, route := range routes {
+		hostnames[i] = route.Host
+	}
+
 	if r.hostsPath != "" {
-		hostnames := make([]string, len(routes))
-		for i, route := range routes {
-			hostnames[i] = route.Host
-		}
 		if err := dns.SyncHosts(r.hostsPath, hostnames); err != nil {
 			r.logger.Error("hosts sync failed", "err", err)
-			// Non-fatal: Traefik config is the primary concern.
+		}
+	}
+
+	if r.certMgr != nil && len(hostnames) > 0 {
+		if _, err := r.certMgr.EnsureCert(hostnames); err != nil {
+			r.logger.Error("cert sync failed", "err", err)
 		}
 	}
 

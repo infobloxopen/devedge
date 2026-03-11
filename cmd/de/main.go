@@ -33,6 +33,10 @@ func rootCmd() *cobra.Command {
 
 	root.AddCommand(
 		versionCmd(),
+		installCmd(),
+		startCmd(),
+		stopCmd(),
+		doctorCmd(),
 		registerCmd(),
 		unregisterCmd(),
 		lsCmd(),
