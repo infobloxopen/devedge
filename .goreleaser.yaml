@@ -5,6 +5,7 @@ project_name: devedge
 before:
   hooks:
     - go mod tidy
+    - go test ./...
 
 builds:
   - id: de
@@ -62,7 +63,7 @@ archives:
       - devedged
       - devedge-dns-webhook
     name_template: "devedge_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: tar.gz
     files:
       - LICENSE
       - README.md
@@ -70,10 +71,8 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-release:
-  github:
-    owner: infobloxopen
-    name: devedge
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -82,3 +81,42 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+homebrew_casks:
+  - name: devedge
+    repository:
+      owner: infobloxopen
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/infobloxopen/devedge
+    description: "Local development edge router and name registry"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            %w[de devedged devedge-dns-webhook].each do |bin|
+              system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/#{bin}"]
+            end
+          end
+    uninstall_postflight: |
+      system_command "#{staged_path}/de", args: ["stop"], print_stderr: false
+    caveats: |
+      To get started:
+        de install    # set up daemon, mkcert CA, DNS
+        de start      # start the background daemon
+        de doctor     # verify everything is healthy
+
+      The binaries are not signed by Apple. The post-install hook clears
+      the quarantine flag automatically. If macOS still blocks them, run:
+        xattr -dr com.apple.quarantine $(brew --caskroom)/devedge
+
+release:
+  github:
+    owner: infobloxopen
+    name: devedge
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}}-v{{.Version}}"
