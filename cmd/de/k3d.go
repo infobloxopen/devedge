@@ -20,6 +20,8 @@ func k3dCmd() *cobra.Command {
 		Short: "Manage k3d cluster integrations",
 	}
 	cmd.AddCommand(
+		k3dCreateCmd(),
+		k3dDeleteCmd(),
 		k3dAttachCmd(),
 		k3dDetachCmd(),
 		k3dLsCmd(),
@@ -198,4 +200,44 @@ to running the full external-dns stack.`,
 	cmd.Flags().StringVar(&ingressPort, "ingress-port", "", "host port for k3d ingress (auto-detected)")
 	cmd.Flags().StringVar(&devedgeURL, "devedge-url", "", "devedge daemon URL")
 	return cmd
+}
+
+func k3dCreateCmd() *cobra.Command {
+	var port string
+	var agents int
+	var image string
+
+	cmd := &cobra.Command{
+		Use:   "create CLUSTER",
+		Short: "Create a k3d cluster pre-configured for devedge",
+		Long: `Create a k3d cluster with ingress port mapping, mkcert CA,
+cert-manager issuer, and external-dns webhook pre-installed.
+
+This is equivalent to running k3d cluster create with the right flags
+followed by de k3d bootstrap.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return k3d.Create(k3d.CreateOptions{
+				ClusterName: args[0],
+				HostPort:    port,
+				Agents:      agents,
+				Image:       image,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&port, "port", "8081", "host port for ingress load balancer")
+	cmd.Flags().IntVar(&agents, "agents", 0, "number of agent nodes")
+	cmd.Flags().StringVar(&image, "image", "", "k3s image (default: k3d default)")
+	return cmd
+}
+
+func k3dDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete CLUSTER",
+		Short: "Delete a k3d cluster and clean up devedge routes",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return k3d.Delete(args[0])
+		},
+	}
 }
