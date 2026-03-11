@@ -101,8 +101,6 @@ homebrew_casks:
               system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/#{bin}"]
             end
           end
-    uninstall_postflight: |
-      system_command "#{staged_path}/de", args: ["stop"], print_stderr: false
     caveats: |
       To get started:
         de install    # set up daemon, mkcert CA, DNS
