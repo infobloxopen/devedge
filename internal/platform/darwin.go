@@ -59,11 +59,31 @@ func (d *DarwinAdapter) Uninstall() error {
 }
 
 func (d *DarwinAdapter) Start() error {
-	return exec.Command("launchctl", "load", d.plistPath()).Run()
+	path := d.plistPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return fmt.Errorf("service not installed; run 'de install' first")
+	}
+	out, err := exec.Command("launchctl", "load", path).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("launchctl load: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	// launchctl exits 0 even on failure; detect it via output.
+	if s := strings.TrimSpace(string(out)); strings.Contains(s, "Load failed") || strings.Contains(s, ": error") {
+		return fmt.Errorf("launchctl load: %s", s)
+	}
+	return nil
 }
 
 func (d *DarwinAdapter) Stop() error {
-	return exec.Command("launchctl", "unload", d.plistPath()).Run()
+	path := d.plistPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return fmt.Errorf("service not installed; run 'de install' first")
+	}
+	out, err := exec.Command("launchctl", "unload", path).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("launchctl unload: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (d *DarwinAdapter) IsRunning() (bool, error) {
