@@ -99,8 +99,8 @@ name pattern). Use --force to bypass if you know what you're doing.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := defaultProvider()
 			rt := cluster.DetectRuntime()
-			fmt.Printf("Container runtime: %s\n", rt)
-			fmt.Printf("Host gateway: %s\n", provider.HostGateway())
+			fmt.Printf("%s %s\n", colorLabel.Sprint("Container runtime:"), rt)
+			fmt.Printf("%s %s\n", colorLabel.Sprint("Host gateway:"), provider.HostGateway())
 
 			return cluster.Bootstrap(cluster.BootstrapOptions{
 				Provider:    provider,
@@ -133,7 +133,7 @@ func clusterAttachCmd() *cobra.Command {
 					return fmt.Errorf("auto-detect ingress: %w\nUse --ingress to specify manually", err)
 				}
 				ingress = fmt.Sprintf("http://127.0.0.1:%s", port)
-				fmt.Printf("Auto-detected ingress: %s\n", ingress)
+				fmt.Printf("%s %s\n", colorLabel.Sprint("Auto-detected ingress:"), colorHost.Sprint(ingress))
 			}
 
 			if len(hosts) == 0 {
@@ -152,7 +152,7 @@ func clusterAttachCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("register %s: %w", h, err)
 				}
-				fmt.Printf("attached %s -> %s (cluster: %s)\n", h, ingress, name)
+				fmt.Printf("attached %s %s %s %s\n", colorHost.Sprint(h), colorLabel.Sprint("->"), ingress, colorLabel.Sprintf("(cluster: %s)", name))
 			}
 			return nil
 		},
@@ -173,7 +173,7 @@ func clusterDetachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("detached %d route(s) for cluster %q\n", n, args[0])
+			fmt.Printf("detached %d route(s) for cluster %s\n", n, colorHost.Sprint(args[0]))
 			return nil
 		},
 	}
@@ -190,11 +190,11 @@ func clusterLsCmd() *cobra.Command {
 				return err
 			}
 			if len(clusters) == 0 {
-				fmt.Println("No clusters found.")
+				fmt.Println(colorWarning.Sprint("No clusters found."))
 				return nil
 			}
 			for _, c := range clusters {
-				fmt.Printf("  %s", c.Name)
+				fmt.Printf("  %s", colorHost.Sprint(c.Name))
 				if len(c.Ports) > 0 {
 					fmt.Printf(" (ports:")
 					for _, p := range c.Ports {
@@ -242,7 +242,7 @@ hostnames with the devedge daemon.`,
 				os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
-			fmt.Printf("Watching Ingress objects in context %q (Ctrl-C to stop)\n", kubectx)
+			fmt.Printf("Watching Ingress objects in context %s %s\n", colorHost.Sprint(kubectx), colorLabel.Sprint("(Ctrl-C to stop)"))
 
 			return k3dpkg.WatchIngresses(ctx, k3dpkg.IngressWatcherConfig{
 				Context:     kubectx,

@@ -53,6 +53,7 @@ func rootCmd() *cobra.Command {
 		uiCmd(),
 	)
 
+	applyColoredHelp(root)
 	return root
 }
 
@@ -138,7 +139,7 @@ func renewCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("renewed %s\n", args[0])
+			fmt.Printf("renewed %s\n", colorHost.Sprint(args[0]))
 			return nil
 		},
 	}
@@ -164,15 +165,15 @@ func lsCmd() *cobra.Command {
 			}
 
 			if len(routes) == 0 {
-				fmt.Println("No active routes.")
+				fmt.Println(colorWarning.Sprint("No active routes."))
 				return nil
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "HOST\tUPSTREAM\tPROTO\tPROJECT\tSOURCE")
+			fmt.Fprintln(w, colorHeader.Sprint("HOST\tUPSTREAM\tPROTO\tPROJECT\tSOURCE"))
 			for _, r := range routes {
 				proto := string(r.EffectiveProtocol())
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Host, r.Upstream, proto, r.Project, r.Source)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", colorHost.Sprint(r.Host), r.Upstream, proto, r.Project, r.Source)
 			}
 			return w.Flush()
 		},
@@ -260,7 +261,7 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 				if err := c.Register(context.Background(), req); err != nil {
 					return fmt.Errorf("register %s: %w", r.Host, err)
 				}
-				fmt.Printf("registered %s -> %s\n", r.Host, r.Upstream)
+				fmt.Printf("registered %s %s %s\n", colorHost.Sprint(r.Host), colorLabel.Sprint("->"), r.Upstream)
 				reqs = append(reqs, req)
 			}
 
@@ -319,7 +320,7 @@ func projectDownCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("removed %d route(s) for project %q\n", n, project)
+			fmt.Printf("removed %d route(s) for project %s\n", n, colorHost.Sprint(project))
 			return nil
 		},
 	}

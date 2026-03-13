@@ -16,25 +16,25 @@ func installCmd() *cobra.Command {
 		Short: "Install devedge daemon and configure the system",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			adapter := platform.Detect()
-			fmt.Printf("Platform: %s\n", adapter.Name())
+			fmt.Printf("%s %s\n", colorLabel.Sprint("Platform:"), adapter.Name())
 
 			// 1. Check mkcert.
 			fmt.Print("Checking mkcert... ")
 			if err := certs.EnsureCA(); err != nil {
-				fmt.Println("installing CA")
+				colorWarning.Println("installing CA")
 				if err := certs.InstallCA(); err != nil {
 					return fmt.Errorf("install mkcert CA: %w", err)
 				}
 			} else {
-				fmt.Println("OK")
+				colorSuccess.Println("OK")
 			}
 
 			// 2. Install macOS resolver if applicable.
 			fmt.Print("Configuring DNS... ")
 			if err := dns.InstallResolverConfig("dev.test"); err != nil {
-				fmt.Printf("skipped (%v)\n", err)
+				colorWarning.Printf("skipped (%v)\n", err)
 			} else {
-				fmt.Println("OK")
+				colorSuccess.Println("OK")
 			}
 
 			// 3. Install daemon service.
@@ -42,9 +42,9 @@ func installCmd() *cobra.Command {
 			if err := adapter.Install(); err != nil {
 				return fmt.Errorf("install service: %w", err)
 			}
-			fmt.Println("OK")
+			colorSuccess.Println("OK")
 
-			fmt.Println("\nInstallation complete. Run 'de start' to start the daemon.")
+			fmt.Printf("\n%s\n", colorSuccess.Sprint("Installation complete.")+colorLabel.Sprint(" Run 'de start' to start the daemon."))
 			return nil
 		},
 	}
@@ -88,17 +88,19 @@ func doctorCmd() *cobra.Command {
 			results := platform.RunDoctor()
 			allPassed := true
 			for _, r := range results {
-				icon := "PASS"
-				if !r.Passed {
-					icon = "FAIL"
+				var icon string
+				if r.Passed {
+					icon = colorSuccess.Sprint("PASS")
+				} else {
+					icon = colorError.Sprint("FAIL")
 					allPassed = false
 				}
 				fmt.Printf("  [%s] %-20s %s\n", icon, r.Name, r.Message)
 			}
 			if allPassed {
-				fmt.Println("\nAll checks passed.")
+				fmt.Printf("\n%s\n", colorSuccess.Sprint("All checks passed."))
 			} else {
-				fmt.Println("\nSome checks failed. Run 'de install' to fix.")
+				fmt.Printf("\n%s\n", colorError.Sprint("Some checks failed.")+" Run 'de install' to fix.")
 			}
 		},
 	}
