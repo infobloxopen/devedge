@@ -14,6 +14,8 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+
+	"github.com/infobloxopen/devedge/internal/cluster"
 )
 
 // IngressWatcherConfig configures the Ingress watcher.
@@ -22,6 +24,7 @@ type IngressWatcherConfig struct {
 	Namespace   string // namespace to watch, "" for all
 	DevedgeURL  string // devedge daemon API URL
 	IngressPort string // host port for the k3d ingress (e.g. "8081")
+	ClusterName string // cluster name for FQDN expansion (e.g. "mydev" → *.mydev.test)
 	Logger      *slog.Logger
 }
 
@@ -99,22 +102,28 @@ func WatchIngresses(ctx context.Context, cfg IngressWatcherConfig) error {
 				continue
 			}
 
+			// Expand bare hostnames to <host>.<cluster>.test
+			host := rule.Host
+			if cfg.ClusterName != "" {
+				host = cluster.FQDN(host, cfg.ClusterName)
+			}
+
 			switch event.Type {
 			case "ADDED", "MODIFIED":
 				upstream := fmt.Sprintf("http://127.0.0.1:%s", cfg.IngressPort)
 				cfg.Logger.Info("registering ingress host",
-					"host", rule.Host,
+					"host", host,
 					"upstream", upstream,
 					"ingress", event.Object.Metadata.Name,
 				)
-				registerViaHTTP(ctx, cfg.DevedgeURL, rule.Host, upstream)
+				registerViaHTTP(ctx, cfg.DevedgeURL, host, upstream)
 
 			case "DELETED":
 				cfg.Logger.Info("deregistering ingress host",
-					"host", rule.Host,
+					"host", host,
 					"ingress", event.Object.Metadata.Name,
 				)
-				deregisterViaHTTP(ctx, cfg.DevedgeURL, rule.Host)
+				deregisterViaHTTP(ctx, cfg.DevedgeURL, host)
 			}
 		}
 	}

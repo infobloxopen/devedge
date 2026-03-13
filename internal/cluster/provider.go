@@ -3,6 +3,8 @@
 // interface is designed for future providers (kind, minikube, etc.).
 package cluster
 
+import "strings"
+
 // Provider handles cluster lifecycle and discovery for a specific tool.
 type Provider interface {
 	// Name returns the provider identifier (e.g. "k3d", "kind").
@@ -37,10 +39,26 @@ type CreateOptions struct {
 	ExtraArgs []string // pass-through to the provider CLI
 }
 
+// ClusterDomain returns the DNS domain for a cluster: <name>.test
+func ClusterDomain(name string) string {
+	return name + ".test"
+}
+
+// FQDN returns the fully qualified hostname for an app in a cluster.
+// If host already contains a dot, it's returned as-is (already qualified).
+// Otherwise it's expanded to <host>.<cluster>.test.
+func FQDN(host, clusterName string) string {
+	if strings.Contains(host, ".") {
+		return host
+	}
+	return host + "." + ClusterDomain(clusterName)
+}
+
 // ClusterInfo describes a discovered cluster.
 type ClusterInfo struct {
-	Name  string
-	Ports []PortMapping
+	Name   string
+	Domain string // e.g. "mydev.test"
+	Ports  []PortMapping
 }
 
 // PortMapping describes a host-to-container port mapping.

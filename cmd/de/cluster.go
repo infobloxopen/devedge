@@ -137,22 +137,23 @@ func clusterAttachCmd() *cobra.Command {
 			}
 
 			if len(hosts) == 0 {
-				return fmt.Errorf("at least one --host is required (e.g. --host api.foo.dev.test)")
+				return fmt.Errorf("at least one --host is required (e.g. --host api)")
 			}
 
 			c := newClient()
 			for _, h := range hosts {
+				fqdn := cluster.FQDN(h, name)
 				err := c.Register(context.Background(), daemon.RegisterRequest{
-					Host:     h,
+					Host:     fqdn,
 					Upstream: ingress,
 					Project:  name,
 					Owner:    provider.Name() + ":" + name,
 					TTL:      "30s",
 				})
 				if err != nil {
-					return fmt.Errorf("register %s: %w", h, err)
+					return fmt.Errorf("register %s: %w", fqdn, err)
 				}
-				fmt.Printf("attached %s %s %s %s\n", colorHost.Sprint(h), colorLabel.Sprint("->"), ingress, colorLabel.Sprintf("(cluster: %s)", name))
+				fmt.Printf("attached %s %s %s %s\n", colorHost.Sprint(fqdn), colorLabel.Sprint("->"), ingress, colorLabel.Sprintf("(cluster: %s)", name))
 			}
 			return nil
 		},
@@ -194,9 +195,10 @@ func clusterLsCmd() *cobra.Command {
 				return nil
 			}
 			for _, c := range clusters {
-				fmt.Printf("  %s", colorHost.Sprint(c.Name))
+				domain := cluster.ClusterDomain(c.Name)
+				fmt.Printf("  %s  *.%s", colorHost.Sprint(c.Name), colorLabel.Sprint(domain))
 				if len(c.Ports) > 0 {
-					fmt.Printf(" (ports:")
+					fmt.Printf("  (ports:")
 					for _, p := range c.Ports {
 						fmt.Printf(" %s->%s", p.HostPort, p.ContainerPort)
 					}
@@ -249,6 +251,7 @@ hostnames with the devedge daemon.`,
 				Namespace:   ns,
 				DevedgeURL:  devedgeURL,
 				IngressPort: ingressPort,
+				ClusterName: name,
 				Logger:      logger,
 			})
 		},

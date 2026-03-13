@@ -145,9 +145,14 @@ func CreateAndBootstrap(provider Provider, opts CreateOptions) error {
 		fmt.Printf("You can retry with: de cluster bootstrap %s\n", opts.Name)
 	}
 
-	fmt.Printf("\nCluster %q ready. Ingress at http://127.0.0.1:%s\n", opts.Name, port)
-	fmt.Println("Deploy your app and annotate Ingress with devedge.io/expose=true")
-	fmt.Printf("Or attach manually: de cluster attach %s --host myapp.dev.test\n", opts.Name)
+	domain := ClusterDomain(opts.Name)
+	fmt.Printf("\nCluster %q ready.\n", opts.Name)
+	fmt.Printf("  Domain:  *.%s\n", domain)
+	fmt.Printf("  Ingress: http://127.0.0.1:%s\n", port)
+	fmt.Println()
+	fmt.Println("Deploy your app and annotate Ingress with devedge.io/expose=true,")
+	fmt.Printf("or attach manually: de cluster attach %s --host api\n", opts.Name)
+	fmt.Printf("  -> api.%s\n", domain)
 	return nil
 }
 
