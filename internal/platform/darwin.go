@@ -37,13 +37,15 @@ func (d *DarwinAdapter) Install() error {
 	}
 
 	home, _ := os.UserHomeDir()
-	logDir := filepath.Join(home, ".devedge", "logs")
+	devedgeHome := filepath.Join(home, ".devedge")
+	logDir := filepath.Join(devedgeHome, "logs")
 	os.MkdirAll(logDir, 0755)
 
 	data := plistData{
-		Label:   launchDaemonLabel,
-		BinPath: binPath,
-		LogDir:  logDir,
+		Label:       launchDaemonLabel,
+		BinPath:     binPath,
+		LogDir:      logDir,
+		DevedgeHome: devedgeHome,
 	}
 
 	var buf strings.Builder
@@ -105,9 +107,10 @@ func (d *DarwinAdapter) IsRunning() (bool, error) {
 }
 
 type plistData struct {
-	Label   string
-	BinPath string
-	LogDir  string
+	Label       string
+	BinPath     string
+	LogDir      string
+	DevedgeHome string
 }
 
 var plistTmpl = template.Must(template.New("plist").Parse(`<?xml version="1.0" encoding="UTF-8"?>
@@ -120,6 +123,11 @@ var plistTmpl = template.Must(template.New("plist").Parse(`<?xml version="1.0" e
     <array>
         <string>{{.BinPath}}</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DEVEDGE_HOME</key>
+        <string>{{.DevedgeHome}}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
