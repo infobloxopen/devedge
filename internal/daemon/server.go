@@ -191,6 +191,8 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.socketPath, err)
 	}
+	// Allow non-root users to connect (daemon runs as root).
+	os.Chmod(s.socketPath, 0666)
 	defer unixLn.Close()
 	defer os.Remove(s.socketPath)
 
