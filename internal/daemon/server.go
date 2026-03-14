@@ -16,28 +16,41 @@ import (
 	traefikrt "github.com/infobloxopen/devedge/internal/traefik"
 )
 
+// devedgeDir returns the base directory for all devedge state.
+// Uses a fixed system path so it works the same whether the daemon
+// runs as root (LaunchDaemon) or the current user.
+func devedgeDir() string {
+	// If DEVEDGE_HOME is set, use it (for testing).
+	if dir := os.Getenv("DEVEDGE_HOME"); dir != "" {
+		return dir
+	}
+	// Use the invoking user's home, not root's.
+	// SUDO_USER is set when running via sudo.
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		return filepath.Join("/Users", sudoUser, ".devedge")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".devedge")
+}
+
 // DefaultSocketPath returns the default Unix socket path for the daemon.
 func DefaultSocketPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".devedge", "devedged.sock")
+	return filepath.Join(devedgeDir(), "devedged.sock")
 }
 
 // DefaultConfigDir returns the default Traefik dynamic config directory.
 func DefaultConfigDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".devedge", "traefik", "dynamic")
+	return filepath.Join(devedgeDir(), "traefik", "dynamic")
 }
 
 // DefaultTraefikDir returns the base Traefik config directory.
 func DefaultTraefikDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".devedge", "traefik")
+	return filepath.Join(devedgeDir(), "traefik")
 }
 
 // DefaultCertsDir returns the default certificate storage directory.
 func DefaultCertsDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".devedge", "certs")
+	return filepath.Join(devedgeDir(), "certs")
 }
 
 // DefaultTCPAddr returns the default TCP address for the admin API.
