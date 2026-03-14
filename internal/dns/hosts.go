@@ -9,6 +9,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/infobloxopen/devedge/pkg/types"
 )
 
 const (
@@ -66,8 +68,7 @@ func buildSection(hostnames []string) string {
 	var b strings.Builder
 	b.WriteString(beginMarker + "\n")
 	for _, h := range sorted {
-		fmt.Fprintf(&b, "127.0.0.1\t%s\n", h)
-		fmt.Fprintf(&b, "::1\t\t%s\n", h)
+		fmt.Fprintf(&b, "%s\t%s\n", types.EdgeIP, h)
 	}
 	b.WriteString(endMarker + "\n")
 	return b.String()

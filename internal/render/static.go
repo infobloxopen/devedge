@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/infobloxopen/devedge/internal/certs"
+	"github.com/infobloxopen/devedge/pkg/types"
 )
 
 // StaticTraefikConfig generates the static Traefik configuration that sets up
@@ -14,14 +15,14 @@ import (
 func StaticTraefikConfig(traefikDir string, dynamicDir string, certPair *certs.CertPair) string {
 	cfg := fmt.Sprintf(`entryPoints:
   web:
-    address: ":80"
+    address: "%s:80"
     http:
       redirections:
         entryPoint:
           to: websecure
           scheme: https
   websecure:
-    address: ":443"
+    address: "%s:443"
 
 providers:
   file:
@@ -31,7 +32,7 @@ providers:
 api:
   dashboard: true
   insecure: true
-`, dynamicDir)
+`, types.EdgeIP, types.EdgeIP, dynamicDir)
 
 	if certPair != nil {
 		cfg += fmt.Sprintf(`

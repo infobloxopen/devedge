@@ -21,12 +21,9 @@ func TestBuildSection(t *testing.T) {
 	if aIdx > bIdx {
 		t.Error("hostnames should be sorted")
 	}
-	// Should have IPv4 and IPv6.
-	if !strings.Contains(got, "127.0.0.1") {
-		t.Error("missing IPv4 loopback")
-	}
-	if !strings.Contains(got, "::1") {
-		t.Error("missing IPv6 loopback")
+	// Should use the dedicated devedge loopback address.
+	if !strings.Contains(got, "127.0.0.2") {
+		t.Error("missing devedge loopback address (127.0.0.2)")
 	}
 }
 

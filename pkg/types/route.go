@@ -14,6 +14,11 @@ const (
 	// protocols). Uses SNI-based TLS termination on the frontend and
 	// raw TCP forwarding to the backend.
 	ProtocolTCP Protocol = "tcp"
+
+	// EdgeIP is the dedicated loopback address for devedge's Traefik proxy.
+	// Using a separate address (not 127.0.0.1) avoids port conflicts with
+	// other local services. All devedge hostnames resolve to this address.
+	EdgeIP = "127.0.0.2"
 )
 
 // Route represents a registered hostname-to-upstream mapping with

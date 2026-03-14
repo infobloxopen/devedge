@@ -82,8 +82,8 @@ func checkDNS() CheckResult {
 		return CheckResult{"DNS *.dev.test", false, "resolution failed (expected if hosts not configured yet)"}
 	}
 	for _, a := range addrs {
-		if a == "127.0.0.1" || a == "::1" {
-			return CheckResult{"DNS *.dev.test", true, "resolves to loopback"}
+		if a == "127.0.0.1" || a == "127.0.0.2" || a == "::1" {
+			return CheckResult{"DNS *.dev.test", true, fmt.Sprintf("resolves to %s", a)}
 		}
 	}
 	return CheckResult{"DNS *.dev.test", false, fmt.Sprintf("resolves to %v, expected loopback", addrs)}
