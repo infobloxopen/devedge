@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/infobloxopen/devedge/internal/certs"
 	"github.com/infobloxopen/devedge/internal/reconciler"
@@ -186,13 +187,14 @@ func (s *Server) Run(ctx context.Context) error {
 	// Remove stale socket.
 	os.Remove(s.socketPath)
 
-	// Listen on Unix socket.
+	// Listen on Unix socket with world-writable permissions so non-root
+	// users can connect to the root-owned daemon.
+	oldUmask := syscall.Umask(0111) // creates socket as 0666
 	unixLn, err := net.Listen("unix", s.socketPath)
+	syscall.Umask(oldUmask)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.socketPath, err)
 	}
-	// Allow non-root users to connect (daemon runs as root).
-	os.Chmod(s.socketPath, 0666)
 	defer unixLn.Close()
 	defer os.Remove(s.socketPath)
 
