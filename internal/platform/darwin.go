@@ -9,19 +9,28 @@ import (
 	"text/template"
 )
 
-const launchAgentLabel = "io.devedge.daemon"
+const launchDaemonLabel = "io.devedge.daemon"
 
-// DarwinAdapter manages devedged as a macOS LaunchAgent.
+// launchDaemonPath is the system-level plist location (runs as root).
+const launchDaemonPath = "/Library/LaunchDaemons/" + launchDaemonLabel + ".plist"
+
+// DarwinAdapter manages devedged as a macOS LaunchDaemon (root).
 type DarwinAdapter struct{}
 
-func (d *DarwinAdapter) Name() string { return "macOS (LaunchAgent)" }
+func (d *DarwinAdapter) Name() string { return "macOS (LaunchDaemon)" }
 
-func (d *DarwinAdapter) plistPath() string {
+func (d *DarwinAdapter) legacyPlistPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
+	return filepath.Join(home, "Library", "LaunchAgents", launchDaemonLabel+".plist")
 }
 
 func (d *DarwinAdapter) Install() error {
+	// Remove legacy LaunchAgent if it exists.
+	if legacy := d.legacyPlistPath(); fileExists(legacy) {
+		exec.Command("launchctl", "unload", legacy).Run()
+		os.Remove(legacy)
+	}
+
 	binPath, err := findDevedged()
 	if err != nil {
 		return err
@@ -32,7 +41,7 @@ func (d *DarwinAdapter) Install() error {
 	os.MkdirAll(logDir, 0755)
 
 	data := plistData{
-		Label:   launchAgentLabel,
+		Label:   launchDaemonLabel,
 		BinPath: binPath,
 		LogDir:  logDir,
 	}
@@ -42,8 +51,13 @@ func (d *DarwinAdapter) Install() error {
 		return fmt.Errorf("render plist: %w", err)
 	}
 
-	if err := os.WriteFile(d.plistPath(), []byte(buf.String()), 0644); err != nil {
-		return fmt.Errorf("write plist: %w", err)
+	if err := os.WriteFile(launchDaemonPath, []byte(buf.String()), 0644); err != nil {
+		return fmt.Errorf("write plist (try with sudo): %w", err)
+	}
+
+	// Set up /etc/resolver for wildcard .test resolution
+	if err := os.MkdirAll("/etc/resolver", 0755); err == nil {
+		os.WriteFile("/etc/resolver/test", []byte("nameserver 127.0.0.1\n"), 0644)
 	}
 
 	return nil
@@ -51,23 +65,20 @@ func (d *DarwinAdapter) Install() error {
 
 func (d *DarwinAdapter) Uninstall() error {
 	d.Stop()
-	path := d.plistPath()
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(launchDaemonPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
 func (d *DarwinAdapter) Start() error {
-	path := d.plistPath()
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return fmt.Errorf("service not installed; run 'de install' first")
+	if _, err := os.Stat(launchDaemonPath); os.IsNotExist(err) {
+		return fmt.Errorf("service not installed; run 'sudo de install' first")
 	}
-	out, err := exec.Command("launchctl", "load", path).CombinedOutput()
+	out, err := exec.Command("launchctl", "load", launchDaemonPath).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("launchctl load: %w — %s", err, strings.TrimSpace(string(out)))
 	}
-	// launchctl exits 0 even on failure; detect it via output.
 	if s := strings.TrimSpace(string(out)); strings.Contains(s, "Load failed") || strings.Contains(s, ": error") {
 		return fmt.Errorf("launchctl load: %s", s)
 	}
@@ -75,11 +86,10 @@ func (d *DarwinAdapter) Start() error {
 }
 
 func (d *DarwinAdapter) Stop() error {
-	path := d.plistPath()
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return fmt.Errorf("service not installed; run 'de install' first")
+	if _, err := os.Stat(launchDaemonPath); os.IsNotExist(err) {
+		return fmt.Errorf("service not installed; run 'sudo de install' first")
 	}
-	out, err := exec.Command("launchctl", "unload", path).CombinedOutput()
+	out, err := exec.Command("launchctl", "unload", launchDaemonPath).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("launchctl unload: %w — %s", err, strings.TrimSpace(string(out)))
 	}
@@ -91,7 +101,7 @@ func (d *DarwinAdapter) IsRunning() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(string(out), launchAgentLabel), nil
+	return strings.Contains(string(out), launchDaemonLabel), nil
 }
 
 type plistData struct {
@@ -123,12 +133,10 @@ var plistTmpl = template.Must(template.New("plist").Parse(`<?xml version="1.0" e
 `))
 
 func findDevedged() (string, error) {
-	// Check common install locations.
 	candidates := []string{
 		"/usr/local/bin/devedged",
 	}
 
-	// Also check next to the current executable.
 	if exe, err := os.Executable(); err == nil {
 		candidates = append([]string{filepath.Join(filepath.Dir(exe), "devedged")}, candidates...)
 	}
@@ -139,10 +147,14 @@ func findDevedged() (string, error) {
 		}
 	}
 
-	// Fall back to PATH.
 	if p, err := exec.LookPath("devedged"); err == nil {
 		return p, nil
 	}
 
 	return "", fmt.Errorf("devedged binary not found; install it to /usr/local/bin/ or add to PATH")
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
