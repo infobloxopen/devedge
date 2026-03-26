@@ -103,15 +103,44 @@ func (p *K3dProvider) FindIngressPort(name string) (string, error) {
 		if c.Name != name {
 			continue
 		}
+		// Look for HTTP port mapping (80/tcp) with a known host port.
 		for _, pm := range c.Ports {
-			if strings.HasPrefix(pm.ContainerPort, "80/") {
+			if strings.HasPrefix(pm.ContainerPort, "80/") && pm.HostPort != "" {
 				return pm.HostPort, nil
 			}
 		}
-		if len(c.Ports) > 0 {
-			return c.Ports[0].HostPort, nil
+		// If k3d metadata has port 80 but host port is empty (ephemeral),
+		// ask docker for the actual mapped port.
+		for _, pm := range c.Ports {
+			if strings.HasPrefix(pm.ContainerPort, "80/") {
+				port, err := dockerPortLookup(name, "80/tcp")
+				if err == nil && port != "" {
+					return port, nil
+				}
+			}
+		}
+		// Fallback: return any port mapping with a known host port.
+		for _, pm := range c.Ports {
+			if pm.HostPort != "" {
+				return pm.HostPort, nil
+			}
 		}
 		return "", fmt.Errorf("cluster %q has no exposed ports", name)
 	}
 	return "", fmt.Errorf("cluster %q not found", name)
+}
+
+// dockerPortLookup uses `docker port` to resolve the actual host port for a
+// container port on the k3d load balancer.
+func dockerPortLookup(clusterName, containerPort string) (string, error) {
+	container := "k3d-" + clusterName + "-serverlb"
+	out, err := exec.Command("docker", "port", container, containerPort).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker port %s %s: %w", container, containerPort, err)
+	}
+	line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	if idx := strings.LastIndex(line, ":"); idx >= 0 {
+		return line[idx+1:], nil
+	}
+	return "", fmt.Errorf("unexpected docker port output: %s", line)
 }

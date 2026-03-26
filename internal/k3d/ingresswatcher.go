@@ -7,7 +7,6 @@
 package k3d
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -56,7 +55,7 @@ func WatchIngresses(ctx context.Context, cfg IngressWatcherConfig) error {
 		cfg.IngressPort = "80"
 	}
 
-	args := []string{"get", "ingress", "--watch", "-o", "json"}
+	args := []string{"get", "ingress", "--watch", "--output-watch-events", "-o", "json"}
 	if cfg.Context != "" {
 		args = append([]string{"--context", cfg.Context}, args...)
 	}
@@ -78,18 +77,14 @@ func WatchIngresses(ctx context.Context, cfg IngressWatcherConfig) error {
 		return fmt.Errorf("start kubectl watch: %w", err)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	// kubectl --watch -o json outputs one JSON object per line.
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "{") {
-			continue
-		}
-
+	dec := json.NewDecoder(stdout)
+	// kubectl --watch -o json outputs a stream of JSON objects (multi-line).
+	// Decode blocks until a complete object arrives or the stream closes.
+	for {
 		var event ingressEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if err := dec.Decode(&event); err != nil {
 			cfg.Logger.Warn("parse ingress event", "err", err)
-			continue
+			break
 		}
 
 		// Check for opt-in annotation.

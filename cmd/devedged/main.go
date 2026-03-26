@@ -22,7 +22,7 @@ func main() {
 	var (
 		tcpAddr       = flag.String("tcp", daemon.DefaultTCPAddr(), "TCP address for admin API and dashboard")
 		hostsPath     = flag.String("hosts", "/etc/hosts", "path to hosts file for DNS management")
-		manageTraefik = flag.Bool("traefik", false, "manage Traefik subprocess lifecycle")
+		manageTraefik = flag.Bool("traefik", true, "manage Traefik subprocess lifecycle")
 	)
 	flag.Parse()
 
