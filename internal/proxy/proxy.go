@@ -151,13 +151,15 @@ func (p *Proxy) Run(ctx context.Context) error {
 	}()
 
 	go func() {
-		p.logger.Info("proxy listening", "addr", httpsAddr, "proto", "https")
-		ln, err := tls.Listen("tcp", httpsAddr, httpsSrv.TLSConfig)
+		p.logger.Info("proxy listening", "addr", httpsAddr, "proto", "https+tcp")
+		rawLn, err := net.Listen("tcp", httpsAddr)
 		if err != nil {
 			errCh <- fmt.Errorf("https listen: %w", err)
 			return
 		}
-		if err := httpsSrv.Serve(ln); err != http.ErrServerClosed {
+		// SNI router: TCP routes get piped directly, HTTP routes go to httpsSrv.
+		httpLn := p.sniListener(rawLn, httpsSrv.TLSConfig)
+		if err := httpsSrv.Serve(httpLn); err != http.ErrServerClosed {
 			errCh <- fmt.Errorf("https: %w", err)
 		}
 	}()
