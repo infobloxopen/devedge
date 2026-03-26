@@ -11,10 +11,10 @@ import (
 	"syscall"
 
 	"github.com/infobloxopen/devedge/internal/certs"
+	"github.com/infobloxopen/devedge/internal/proxy"
 	"github.com/infobloxopen/devedge/internal/reconciler"
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/internal/render"
-	traefikrt "github.com/infobloxopen/devedge/internal/traefik"
 )
 
 // devedgeDir returns the base directory for all devedge state.
@@ -173,15 +173,14 @@ func (s *Server) Run(ctx context.Context) error {
 		s.logger.Error("write static traefik config failed", "err", err)
 	}
 
-	// Start Traefik if managed.
+	// Start embedded reverse proxy on EdgeIP (127.0.0.2:80/443).
 	if s.manageTraefik {
-		rt := traefikrt.NewRuntime(s.traefikDir, s.logger)
-		staticPath := filepath.Join(s.traefikDir, "traefik.yaml")
-		if err := rt.Start(ctx, staticPath); err != nil {
-			s.logger.Error("traefik start failed", "err", err)
-		} else {
-			defer rt.Stop()
-		}
+		p := proxy.New(s.reg, certPair, s.logger)
+		go func() {
+			if err := p.Run(ctx); err != nil {
+				s.logger.Error("proxy failed", "err", err)
+			}
+		}()
 	}
 
 	// Remove stale socket.
