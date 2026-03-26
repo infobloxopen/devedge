@@ -158,8 +158,8 @@ func (s *Server) Run(ctx context.Context) error {
 	certMgr := certs.NewManager(s.certsDir, s.logger)
 	var certPair *certs.CertPair
 	if err := certs.EnsureCA(); err == nil {
-		// Generate an initial wildcard cert for dev.test.
-		pair, err := certMgr.EnsureCert([]string{"*.dev.test", "dev.test"})
+		// Generate a wildcard cert covering all .test subdomains.
+		pair, err := certMgr.EnsureCert([]string{"*.test", "*.dev.test", "*.dk-local.test", "dev.test"})
 		if err != nil {
 			s.logger.Warn("initial cert generation failed", "err", err)
 		} else {

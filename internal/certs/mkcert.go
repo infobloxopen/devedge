@@ -1,18 +1,25 @@
 // Package certs manages locally-trusted TLS certificates for devedge
-// hostnames using mkcert as the underlying tool.
+// hostnames. When possible it uses the mkcert CA to sign certificates
+// using Go's crypto/x509 directly — no mkcert binary needed at runtime.
 package certs
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"math/big"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
+	"time"
 )
 
 // Manager handles certificate issuance and lifecycle for registered hostnames.
@@ -31,22 +38,14 @@ func NewManager(certsDir string, logger *slog.Logger) *Manager {
 	}
 }
 
-// EnsureCA checks that the mkcert local CA is installed. Returns an error
-// if mkcert is not available or the CA is not installed.
+// EnsureCA checks that the mkcert local CA is available. Uses CARoot()
+// which checks both PATH and well-known locations.
 func EnsureCA() error {
-	if _, err := exec.LookPath("mkcert"); err != nil {
-		return fmt.Errorf("mkcert not found in PATH: %w", err)
-	}
-	// Check CAROOT is set up.
-	out, err := exec.Command("mkcert", "-CAROOT").CombinedOutput()
+	root, err := CARoot()
 	if err != nil {
-		return fmt.Errorf("mkcert -CAROOT failed: %w", err)
+		return err
 	}
-	caRoot := strings.TrimSpace(string(out))
-	if caRoot == "" {
-		return fmt.Errorf("mkcert CA root is empty; run 'mkcert -install' first")
-	}
-	certPath := filepath.Join(caRoot, "rootCA.pem")
+	certPath := filepath.Join(root, "rootCA.pem")
 	if _, err := os.Stat(certPath); err != nil {
 		return fmt.Errorf("mkcert CA not found at %s; run 'mkcert -install' first", certPath)
 	}
@@ -56,7 +55,11 @@ func EnsureCA() error {
 // InstallCA runs 'mkcert -install' to install the local CA into system
 // and browser trust stores.
 func InstallCA() error {
-	cmd := exec.Command("mkcert", "-install")
+	mkcert, err := findMkcert()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(mkcert, "-install")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -69,8 +72,8 @@ type CertPair struct {
 }
 
 // EnsureCert generates a certificate covering the given hostnames if one
-// does not already exist or if the hostname set has changed. Returns the
-// paths to the cert and key files.
+// does not already exist or if the hostname set has changed. Signs using
+// the mkcert CA directly via Go crypto — no mkcert binary needed.
 func (m *Manager) EnsureCert(hostnames []string) (*CertPair, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -94,16 +97,88 @@ func (m *Manager) EnsureCert(hostnames []string) (*CertPair, error) {
 
 	m.logger.Info("generating certificate", "hostnames", len(sorted))
 
-	args := make([]string, 0, len(sorted)+2)
-	args = append(args, "-cert-file", certFile, "-key-file", keyFile)
-	args = append(args, sorted...)
-
-	cmd := exec.Command("mkcert", args...)
-	cmd.Dir = m.certsDir
-	out, err := cmd.CombinedOutput()
+	// Read the mkcert CA.
+	caCertPEM, caKeyPEM, err := ReadCAFiles()
 	if err != nil {
-		return nil, fmt.Errorf("mkcert failed: %w\noutput: %s", err, out)
+		return nil, fmt.Errorf("read CA: %w", err)
 	}
+
+	caBlock, _ := pem.Decode(caCertPEM)
+	if caBlock == nil {
+		return nil, fmt.Errorf("failed to decode CA cert PEM")
+	}
+	caCert, err := x509.ParseCertificate(caBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse CA cert: %w", err)
+	}
+
+	caKeyBlock, _ := pem.Decode(caKeyPEM)
+	if caKeyBlock == nil {
+		return nil, fmt.Errorf("failed to decode CA key PEM")
+	}
+	caKey, err := x509.ParsePKCS8PrivateKey(caKeyBlock.Bytes)
+	if err != nil {
+		// Try EC private key format.
+		caKey, err = x509.ParseECPrivateKey(caKeyBlock.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse CA key: %w", err)
+		}
+	}
+
+	// Generate leaf key and certificate.
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+
+	var dnsNames []string
+	var ips []net.IP
+	for _, h := range sorted {
+		if ip := net.ParseIP(h); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			dnsNames = append(dnsNames, h)
+		}
+	}
+
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: sorted[0]},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(825 * 24 * time.Hour), // ~2 years, within CA limits
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     dnsNames,
+		IPAddresses:  ips,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		return nil, fmt.Errorf("sign certificate: %w", err)
+	}
+
+	// Write cert PEM (leaf + CA chain).
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return nil, err
+	}
+	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	pem.Encode(certOut, caBlock) // include CA for chain
+	certOut.Close()
+
+	// Write key PEM.
+	keyDER, err := x509.MarshalECPrivateKey(leafKey)
+	if err != nil {
+		return nil, err
+	}
+	keyOut, err := os.Create(keyFile)
+	if err != nil {
+		return nil, err
+	}
+	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	keyOut.Close()
 
 	return &CertPair{CertFile: certFile, KeyFile: keyFile}, nil
 }
