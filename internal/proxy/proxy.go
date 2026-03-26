@@ -34,7 +34,8 @@ import (
 type Proxy struct {
 	reg    *registry.Registry
 	logger *slog.Logger
-	ca     *caState // loaded CA for signing; nil means self-signed fallback
+	ca     *caState   // loaded CA for signing; nil means self-signed fallback
+	cache  *certCache // shared cert cache, pre-warmed and used by GetCertificate
 }
 
 // caState holds the parsed mkcert CA cert and key for on-the-fly signing.
@@ -70,7 +71,7 @@ func (c *certCache) put(host string, cert *tls.Certificate) {
 // the mkcert CA is loaded for dynamic cert generation; otherwise a self-signed
 // CA is generated at startup.
 func New(reg *registry.Registry, certPair *certs.CertPair, logger *slog.Logger) *Proxy {
-	p := &Proxy{reg: reg, logger: logger}
+	p := &Proxy{reg: reg, logger: logger, cache: newCertCache()}
 
 	// Try to load the mkcert CA for signing.
 	if ca, err := loadCA(); err == nil {
@@ -83,11 +84,44 @@ func New(reg *registry.Registry, certPair *certs.CertPair, logger *slog.Logger) 
 	return p
 }
 
+// WarmCerts pre-generates TLS certificates for all currently registered
+// route hostnames so the first request doesn't pay the generation cost.
+func (p *Proxy) WarmCerts() {
+	for _, route := range p.reg.List() {
+		if _, ok := p.cache.get(route.Host); ok {
+			continue
+		}
+		cert, err := p.generateCert(route.Host)
+		if err != nil {
+			p.logger.Warn("pre-generate cert failed", "host", route.Host, "err", err)
+			continue
+		}
+		p.cache.put(route.Host, cert)
+		p.logger.Info("pre-generated TLS cert", "host", route.Host)
+	}
+}
+
 // Run starts HTTP and HTTPS listeners on the EdgeIP. It blocks until
 // the context is cancelled.
 func (p *Proxy) Run(ctx context.Context) error {
 	handler := p.handler()
-	cache := newCertCache()
+
+	// Pre-generate certs for any routes already registered.
+	p.WarmCerts()
+
+	// Periodically warm certs for newly registered routes.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				p.WarmCerts()
+			}
+		}
+	}()
 
 	httpAddr := net.JoinHostPort(types.EdgeIP, "80")
 	httpsAddr := net.JoinHostPort(types.EdgeIP, "443")
@@ -102,7 +136,7 @@ func (p *Proxy) Run(ctx context.Context) error {
 		Handler: handler,
 		TLSConfig: &tls.Config{
 			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return p.getCert(cache, hello.ServerName)
+				return p.getCert(p.cache, hello.ServerName)
 			},
 		},
 	}
