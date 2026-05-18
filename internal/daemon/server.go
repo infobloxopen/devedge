@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/infobloxopen/devedge/internal/certs"
+	"github.com/infobloxopen/devedge/internal/dnsserver"
 	"github.com/infobloxopen/devedge/internal/proxy"
 	"github.com/infobloxopen/devedge/internal/reconciler"
 	"github.com/infobloxopen/devedge/internal/registry"
@@ -59,19 +60,28 @@ func DefaultTCPAddr() string {
 	return "127.0.0.1:15353"
 }
 
+// DefaultDNSAddr returns the default DNS endpoint address.
+// Matches the port written into /etc/resolver/<suffix> by
+// internal/dns.InstallResolverConfig.
+func DefaultDNSAddr() string {
+	return dnsserver.DefaultAddr
+}
+
 // Server is the devedged control plane.
 type Server struct {
-	socketPath   string
-	configDir    string
-	traefikDir   string
-	certsDir     string
-	hostsPath    string
-	tcpAddr      string
+	socketPath    string
+	configDir     string
+	traefikDir    string
+	certsDir      string
+	hostsPath     string
+	tcpAddr       string
+	dnsAddr       string
+	dnsSource     dnsserver.SuffixSource
 	manageTraefik bool
-	reg          *registry.Registry
-	rec          *reconciler.Reconciler
-	api          *API
-	logger       *slog.Logger
+	reg           *registry.Registry
+	rec           *reconciler.Reconciler
+	api           *API
+	logger        *slog.Logger
 }
 
 // ServerOption configures a Server.
@@ -97,6 +107,20 @@ func WithTCPAddr(addr string) ServerOption {
 	return func(s *Server) { s.tcpAddr = addr }
 }
 
+// WithDNSAddr sets the loopback address the DNS endpoint binds.
+// Defaults to dnsserver.DefaultAddr. Tests can pass "127.0.0.1:0" for
+// an ephemeral port.
+func WithDNSAddr(addr string) ServerOption {
+	return func(s *Server) { s.dnsAddr = addr }
+}
+
+// WithDNSSuffixSource overrides the SuffixSource used by the DNS
+// server. Defaults to dnsserver.NewPlatformSuffixSource, which reads
+// /etc/resolver/ on macOS and returns the empty set elsewhere.
+func WithDNSSuffixSource(src dnsserver.SuffixSource) ServerOption {
+	return func(s *Server) { s.dnsSource = src }
+}
+
 // WithManageTraefik enables automatic Traefik subprocess management.
 func WithManageTraefik(b bool) ServerOption {
 	return func(s *Server) { s.manageTraefik = b }
@@ -111,16 +135,20 @@ func WithServerLogger(l *slog.Logger) ServerOption {
 func NewServer(opts ...ServerOption) *Server {
 	home, _ := os.UserHomeDir()
 	s := &Server{
-		socketPath:   DefaultSocketPath(),
-		configDir:    DefaultConfigDir(),
-		traefikDir:   DefaultTraefikDir(),
-		certsDir:     DefaultCertsDir(),
-		hostsPath:    filepath.Join(home, ".devedge", "hosts"),
-		tcpAddr:      DefaultTCPAddr(),
-		logger:       slog.Default(),
+		socketPath: DefaultSocketPath(),
+		configDir:  DefaultConfigDir(),
+		traefikDir: DefaultTraefikDir(),
+		certsDir:   DefaultCertsDir(),
+		hostsPath:  filepath.Join(home, ".devedge", "hosts"),
+		tcpAddr:    DefaultTCPAddr(),
+		dnsAddr:    DefaultDNSAddr(),
+		logger:     slog.Default(),
 	}
 	for _, o := range opts {
 		o(s)
+	}
+	if s.dnsSource == nil {
+		s.dnsSource = dnsserver.NewPlatformSuffixSource(s.logger)
 	}
 
 	// Build reconciler options.
@@ -182,6 +210,21 @@ func (s *Server) Run(ctx context.Context) error {
 			}
 		}()
 	}
+
+	// Start the authoritative DNS endpoint. Fail-open: bind/serve
+	// errors are logged but do not abort the daemon, so the HTTP
+	// admin API and proxy continue running even when DNS is unhealthy.
+	// de doctor's DNS endpoint probe is the user-visible signal for
+	// a DNS-layer fault.
+	dnsServer := dnsserver.New(s.dnsSource,
+		dnsserver.WithAddr(s.dnsAddr),
+		dnsserver.WithLogger(s.logger),
+	)
+	go func() {
+		if err := dnsServer.Run(ctx); err != nil {
+			s.logger.Error("dnsserver failed", "addr", s.dnsAddr, "err", err)
+		}
+	}()
 
 	// Remove stale socket.
 	os.Remove(s.socketPath)

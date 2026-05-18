@@ -11,19 +11,21 @@ import (
 const resolverDir = "/etc/resolver"
 
 // InstallResolverConfig creates a macOS /etc/resolver/ drop-in that tells the
-// system resolver to send all queries for the given domain to loopback. This
-// enables wildcard resolution without a custom DNS server — the system
-// resolver handles the forwarding.
+// system resolver to send all queries for the given domain to the
+// devedge in-process DNS endpoint on 127.0.0.1:15354. mDNSResponder
+// reads this file and routes queries for the domain to the configured
+// nameserver+port, enabling wildcard resolution for any hostname in
+// the suffix.
 //
-// This is supplementary to /etc/hosts management. The resolver drop-in
-// provides wildcard support for hostnames not yet explicitly registered,
-// while /etc/hosts provides immediate resolution without any listener.
+// The HTTP admin API on 127.0.0.1:15353 is unrelated and continues to
+// serve only HTTP. The DNS endpoint is bound on a dedicated port so the
+// two never collide.
 func InstallResolverConfig(domain string) error {
 	if err := os.MkdirAll(resolverDir, 0755); err != nil {
 		return fmt.Errorf("create resolver dir: %w", err)
 	}
 
-	content := fmt.Sprintf("# Managed by devedge — do not edit\nnameserver 127.0.0.1\nport 15353\n")
+	content := "# Managed by devedge — do not edit\nnameserver 127.0.0.1\nport 15354\n"
 	path := filepath.Join(resolverDir, domain)
 
 	return os.WriteFile(path, []byte(content), 0644)
