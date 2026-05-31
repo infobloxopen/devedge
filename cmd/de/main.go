@@ -239,13 +239,21 @@ With --watch, the command stays running and sends heartbeats to renew
 leases. This keeps routes alive for as long as the project is active.
 Press Ctrl-C to stop and let leases expire naturally.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.LoadProject(file)
+			res, err := config.LoadResource(file)
 			if err != nil {
 				return err
 			}
-			routes, err := cfg.ToRoutes()
+			routes, err := res.ToRoutes()
 			if err != nil {
 				return err
+			}
+			if len(routes) == 0 {
+				fmt.Printf("no routes declared in %s\n", file)
+			}
+			if dd, ok := res.(config.DependencyDeclarer); ok {
+				if report := config.FormatDependencies(dd.Dependencies()); report != "" {
+					fmt.Println(report)
+				}
 			}
 
 			c := newClient()
@@ -269,11 +277,14 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 				return nil
 			}
 
-			// Heartbeat loop — renew leases at half the TTL interval.
+			// Heartbeat loop — renew leases at half the TTL interval. Routes
+			// from a project file share the same default TTL, so the first
+			// positive TTL is representative.
 			interval := 15 * time.Second
-			if cfg.Spec.Defaults.TTL != "" {
-				if d, err := time.ParseDuration(cfg.Spec.Defaults.TTL); err == nil && d > 0 {
-					interval = d / 2
+			for _, r := range routes {
+				if r.TTL > 0 {
+					interval = r.TTL / 2
+					break
 				}
 			}
 
@@ -308,11 +319,11 @@ func projectDownCmd() *cobra.Command {
 			}
 			if project == "" {
 				// Try to read from devedge.yaml.
-				cfg, err := config.LoadProject("devedge.yaml")
+				res, err := config.LoadResource("devedge.yaml")
 				if err != nil {
 					return fmt.Errorf("project name required (pass as argument or use devedge.yaml)")
 				}
-				project = cfg.Project()
+				project = res.Project()
 			}
 
 			c := newClient()

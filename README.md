@@ -248,6 +248,38 @@ spec:
       protocol: tcp
 ```
 
+### `Service` kind
+
+In addition to `kind: Config`, devedge understands `kind: Service` — a service-oriented
+project file that routes exactly like `Config` but also declares its development hostname and
+runtime dependencies. Unlike `Config`, a `Service` document is parsed **strictly**: unknown
+fields are rejected to catch typos.
+
+```yaml
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: webhooks
+spec:
+  dev:
+    hostname: webhooks.dev.test    # required; valid hostname
+  dependencies:                    # optional; declared and reported, not yet started
+    - name: db
+      engine: postgres             # postgres | redis
+      version: "16"                # optional
+      port: 5432                   # 1-65535
+    - name: cache
+      engine: redis
+      port: 6379
+  routes:                          # optional; same shape as Config routes
+    - host: webhooks.dev.test
+      upstream: http://127.0.0.1:8080
+```
+
+`de project up` registers the routes and reports any declared dependencies (starting them is
+not yet supported). The full schema and error contract are documented in
+[`specs/002-service-config-kind/contracts/service-config.md`](specs/002-service-config-kind/contracts/service-config.md).
+
 ## Development
 
 ```bash
