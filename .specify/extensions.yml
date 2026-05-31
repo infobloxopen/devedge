@@ -1,0 +1,26 @@
+# Spec Kit extension hooks — enforce the agentic delivery lifecycle defined in CLAUDE.md.
+# Read by /speckit.implement before and after implementation.
+hooks:
+  before_implement:
+    - extension: model-routing
+      enabled: true
+      optional: true
+      command: "route-tasks"
+      description: "Confirm complexity tags on tasks.md and route [S]->Sonnet, [C]->Opus."
+      prompt: |
+        Before implementing, confirm every task in tasks.md carries a complexity tag
+        ([S] simple/mechanical or [C] complex); tag any that are missing. Dispatch [S] tasks
+        to Sonnet subagents (Agent tool, model: sonnet) and keep [C] tasks on Opus.
+
+  after_implement:
+    - extension: verify-change
+      enabled: true
+      optional: false
+      command: "verify-change"
+      description: "Run the QA gate: build, lint, tests, e2e-if-relevant, and a scope check vs the spec."
+      prompt: |
+        Run the verification gate via the verify-change skill: make build + make lint + unit +
+        integration tests; e2e (k3d) if the change touches routing, DNS, certs, background
+        processes, or dependency orchestration. Then diff the change against the spec's
+        acceptance criteria and flag anything beyond scope. Functional failures or scope creep
+        mean the feature is NOT done.
