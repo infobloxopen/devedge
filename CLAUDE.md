@@ -20,8 +20,8 @@ phases; each phase has a gate that must pass before the next begins.
 | Phase | Command(s) | Model | Gate to advance |
 |-------|-----------|-------|-----------------|
 | **Propose** | `/speckit.specify` | Opus 4.8 | Spec has acceptance criteria + failure modes |
-| **Analyze** | `/speckit.clarify` → `/speckit.analyze` | Opus 4.8 | Ambiguities resolved; tasks complexity-tagged |
-| **Plan** | `/speckit.plan` → `/speckit.tasks` | Opus 4.8 | Constitution Check passes |
+| **Analyze** | `/speckit.clarify` | Opus 4.8 | Ambiguities resolved |
+| **Plan** | `/speckit.plan` → `/speckit.tasks` → `/speckit.analyze` | Opus 4.8 | Tasks complexity-tagged; cross-artifact consistency gate clean |
 | **Implement** | `/speckit.implement` | Sonnet `[S]` / Opus `[C]` | Tasks `[X]`; tests green |
 | **QA** | `/verify-change` → `/speckit.checklist` | Opus | Functional + scope gates pass |
 | **Document** | docs update | Sonnet | README / CLAUDE / CHANGELOG current |
@@ -69,6 +69,8 @@ See `.claude/skills/README.md` for the template and conventions.
 ## Active Technologies
 - Go 1.25.5 (from `go.mod`) (001-fix-dns-udp-bind)
 - No new persistent storage. The set of authoritative DNS suffixes (001-fix-dns-udp-bind)
+- Go 1.25.5 (from `go.mod`) + `gopkg.in/yaml.v3` (already in use); standard library (002-service-config-kind)
+- N/A (parses a local YAML file; no persistence added) (002-service-config-kind)
 
 ## Recent Changes
 - 001-fix-dns-udp-bind: Added Go 1.25.5 (from `go.mod`)
