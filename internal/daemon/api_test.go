@@ -16,7 +16,7 @@ func testAPI(t *testing.T) (*API, *registry.Registry) {
 	t.Helper()
 	reg := registry.New()
 	logger := slog.Default()
-	return NewAPI(reg, logger), reg
+	return NewAPI(reg, nil, logger), reg
 }
 
 func TestListRoutes_empty(t *testing.T) {

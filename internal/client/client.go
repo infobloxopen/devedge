@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/infobloxopen/devedge/internal/daemon"
+	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/pkg/types"
 )
 
@@ -103,6 +104,48 @@ func (c *Client) DeregisterProject(ctx context.Context, project string) (int, er
 	var result map[string]int
 	json.NewDecoder(resp.Body).Decode(&result)
 	return result["removed"], nil
+}
+
+// ApplyDependencies sends a service's declared dependencies to the daemon, which
+// reconciles them synchronously and returns the per-dependency results (env var +
+// DSN file path + state; never raw credentials).
+func (c *Client) ApplyDependencies(ctx context.Context, service string, deps []daemon.DependencyRequest) ([]depruntime.Result, error) {
+	body, _ := json.Marshal(deps)
+	resp, err := c.do(ctx, "PUT", "/v1/services/"+service+"/dependencies", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, readError(resp)
+	}
+	var results []depruntime.Result
+	return results, json.NewDecoder(resp.Body).Decode(&results)
+}
+
+// GetDependencies returns the daemon's latest observed dependency results.
+func (c *Client) GetDependencies(ctx context.Context, service string) ([]depruntime.Result, error) {
+	var results []depruntime.Result
+	err := c.get(ctx, "/v1/services/"+service+"/dependencies", &results)
+	return results, err
+}
+
+// ReleaseDependencies releases a service's dependencies. clean drops the
+// isolation slices (destructive); default preserves data.
+func (c *Client) ReleaseDependencies(ctx context.Context, service string, clean bool) error {
+	path := "/v1/services/" + service + "/dependencies"
+	if clean {
+		path += "?clean=true"
+	}
+	resp, err := c.do(ctx, "DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	return readError(resp)
 }
 
 func (c *Client) get(ctx context.Context, path string, v any) error {

@@ -50,7 +50,7 @@ plan "Backward compatibility & external consumers"): the route registry/reconcil
 - [X] T003 [P] [S] Golden-render tests in `internal/helm/helm_test.go`: `helm template` of the embedded `postgres` and `redis` charts is deterministic and contains a StatefulSet + Service + PVC in the `devedge-deps` namespace. (skipped-with-reason if `helm` absent)
 - [X] T004 [P] [S] Unit tests in `internal/dsn/dsn_test.go`: for postgres and redis, the env-var value is the indirect `fsnotify://<driver>/<abs-path>` form and the file holds the real DSN; the same shape is produced for **both** engines; the file is written `0600` atomically.
 - [X] T005 [P] [C] Reconcile tests in `internal/depruntime/reconcile_test.go` against the **fake** `Provisioner`: desired→Ready state transitions; idempotent re-reconcile (no duplicate provisioning, no data loss); a bounded-timeout readiness failure surfaces per-dependency and leaves no half-state (FR-008/FR-009).
-- [ ] T006 [P] [S] Daemon API tests in `test/integration/dependency_api_test.go`: the **existing** `PUT /v1/routes`, `DELETE /v1/projects/{project}`, `GET /v1/status` are unchanged (path/port/shape); the new `PUT/GET/DELETE /v1/services/{svc}/dependencies` upsert/report/release and never echo raw credentials. (DK regression oracle)
+- [X] T006 [P] [S] Daemon API tests in `test/integration/dependency_api_test.go`: the **existing** `PUT /v1/routes`, `DELETE /v1/projects/{project}`, `GET /v1/status` are unchanged (path/port/shape); the new `PUT/GET/DELETE /v1/services/{svc}/dependencies` upsert/report/release and never echo raw credentials. (DK regression oracle)
 
 ### Implementation
 
@@ -59,8 +59,8 @@ plan "Backward compatibility & external consumers"): the route registry/reconcil
 - [X] T009 [S] Implement `internal/dsn/dsn.go`: build the real DSN per engine, the indirect `fsnotify://<driver>/<file>` env value (uniform for postgres + redis), file-path derivation under `~/.devedge/services/<service>/`, and atomic `0600` write. (depends on T004)
 - [X] T010 [C] Implement the `Provisioner` adapter in `internal/depruntime/provisioner.go`: interface (`EnsureInstance`, `EnsureDatabase`, `DropDatabase`, `Ready`) + a real impl wrapping `internal/helm` (instance) and a new `internal/cluster/exec.go` `kubectlExec` helper (psql/redis-cli for db/role/ACL), + a **fake** for tests. (depends on T005, T008)
 - [X] T011 [C] Implement `internal/depruntime/desired.go` + `reconcile.go`: derive desired state from a Service's dependencies; idempotent converge (ensure instance → provision isolation → write DSN → readiness probe), per-dependency errors, bounded timeout. (depends on T005, T009, T010)
-- [ ] T012 [C] Implement `internal/daemon/depstore.go` (desired-dependency registry mirroring `registry.go`: event-driven, thread-safe) and wire a `internal/reconciler/dependency.go` that converges via `depruntime.Reconcile` **beside** the route reconciler without altering it. (depends on T011)
-- [ ] T013 [S] Add the additive daemon endpoints in `internal/daemon/api.go` (`PUT/GET/DELETE /v1/services/{svc}/dependencies`; `GET` never returns raw creds/DSN) and the matching client methods in `internal/client/client.go`. (depends on T006, T012)
+- [X] T012 [C] Implement `internal/daemon/depstore.go` (desired-dependency registry mirroring `registry.go`: event-driven, thread-safe) and wire a `internal/reconciler/dependency.go` that converges via `depruntime.Reconcile` **beside** the route reconciler without altering it. (depends on T011)
+- [X] T013 [S] Add the additive daemon endpoints in `internal/daemon/api.go` (`PUT/GET/DELETE /v1/services/{svc}/dependencies`; `GET` never returns raw creds/DSN) and the matching client methods in `internal/client/client.go`. (depends on T006, T012)
 - [ ] T014 [C] Add a TCP entrypoint + catch-all `HostSNI("*")` router per dependency engine (`postgres`/`redis` on `5432`/`6379` at the EdgeIP) in `internal/render/traefik.go`, plus the stable-hostname registration — **without** changing existing HTTP/TCP route rendering. (depends on T012)
 
 **Checkpoint**: deps can be declared to the daemon, an instance can be Helm-installed, isolation
@@ -78,7 +78,7 @@ connect with the reported DSN, create+query a table; `de project down` releases 
 
 ### Tests (write first, must FAIL)
 
-- [ ] T015 [P] [S] [US1] Integration test in `test/integration/dependency_runtime_test.go` (fake provisioner): `up` on a Service with one postgres dep drives it to Ready, writes the DSN file + reports the `fsnotify://` env var, and `up` is idempotent. Co-existence-safe (unique names, self-cleanup, isolated daemon).
+- [X] T015 [P] [S] [US1] Integration test in `test/integration/dependency_runtime_test.go` (fake provisioner): `up` on a Service with one postgres dep drives it to Ready, writes the DSN file + reports the `fsnotify://` env var, and `up` is idempotent. Co-existence-safe (unique names, self-cleanup, isolated daemon).
 - [ ] T016 [P] [C] [US1] e2e test in `test/e2e/dependency_postgres_test.go` (k3d): Helm-install the shared Postgres, provision a service DB, connect over the reported DSN, write+read a row. **Skipped-with-reason** when Docker/k3d/helm absent (never claimed passed).
 - [X] T017 [P] [S] [US1] Unit test in `pkg/config/service.go` test for the new `Dependency` helpers (default port per engine, env-var name, DSN file path).
 
@@ -102,7 +102,7 @@ in each; confirm each sees only its own and both are reachable.
 
 ### Tests (write first, must FAIL)
 
-- [ ] T021 [P] [C] [US2] Integration test (fake provisioner) in `test/integration/dependency_runtime_test.go`: two services with dep name `db` get distinct database/role/password; cross-access is denied; one service's `down` leaves the other intact.
+- [X] T021 [P] [C] [US2] Integration test (fake provisioner) in `test/integration/dependency_runtime_test.go`: two services with dep name `db` get distinct database/role/password; cross-access is denied; one service's `down` leaves the other intact.
 - [X] T022 [P] [S] [US2] Unit test in `internal/depruntime/desired_test.go`: per-(service,dependency) identifier derivation is deterministic, sanitized, and collision-avoided.
 
 ### Implementation
@@ -122,7 +122,7 @@ in each; confirm each sees only its own and both are reachable.
 
 ### Tests (write first, must FAIL)
 
-- [ ] T025 [P] [S] [US3] Integration test (fake provisioner): default `down` keeps the binding's data; `down --clean` calls `DropDatabase` for **only** that service; the shared instance/PVC are never dropped.
+- [X] T025 [P] [S] [US3] Integration test (fake provisioner): default `down` keeps the binding's data; `down --clean` calls `DropDatabase` for **only** that service; the shared instance/PVC are never dropped.
 - [ ] T026 [P] [C] [US3] e2e (k3d) addition in `test/e2e/dependency_postgres_test.go`: write → `down` → `up` retains data; `down --clean` → `up` starts empty. Skipped-with-reason when k3d absent.
 
 ### Implementation
@@ -181,7 +181,7 @@ namespaces; each sees only its own keys; both reachable; `down --clean` drops on
 ## Phase 8: Polish & Cross-Cutting Concerns
 
 - [ ] T036 [P] [S] **DK regression** test in `test/integration/`: a `kind: Config` file routes via `de project up`/`down` exactly as before, and `PUT /v1/routes` + `DELETE /v1/projects/{project}` at `:15353` are unchanged — proving `platform.data.kit`'s surface is intact (see plan "Backward compatibility & external consumers").
-- [ ] T037 [S] **Observability (Constitution V)**: emit structured logs on each dependency provision/teardown (desired vs observed state) and assert `GET /v1/services/{svc}/dependencies` reflects per-dependency `State` without raw credentials — mirroring the existing route-mutation observability. (depends on T012, T013)
+- [X] T037 [S] **Observability (Constitution V)**: emit structured logs on each dependency provision/teardown (desired vs observed state) and assert `GET /v1/services/{svc}/dependencies` reflects per-dependency `State` without raw credentials — mirroring the existing route-mutation observability. (depends on T012, T013)
 - [ ] T038 [P] [S] Update `README.md` (Service dependency runtime: `up`/`down`/`--clean`/`chart`, the `fsnotify://` DSN convention for both engines, required `helm`/`kubectl`/`k3d`) and verify `specs/003-dependency-runtime/quickstart.md` matches the shipped commands.
 - [ ] T039 [S] Run the QA gate (the `after_implement` `verify-change` hook): `make build` + `make lint` + unit + integration; e2e (k3d) since this touches cluster orchestration/DNS/routing — CI provides a dedicated k3d; on a dev machine use the shared k3d if present, else report **skipped** (never claim passed); co-existence-safe. Then the scope check against this spec's acceptance criteria.
 

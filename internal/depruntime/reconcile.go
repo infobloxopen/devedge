@@ -2,7 +2,9 @@ package depruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/infobloxopen/devedge/internal/dsn"
@@ -22,13 +24,13 @@ const (
 // Result is the observed outcome for one dependency after a reconcile pass. It
 // never carries the real DSN or credentials (those live only in the DSN file).
 type Result struct {
-	Name        string
-	Engine      Engine
-	State       State
-	EnvVarName  string
-	EnvVarValue string // indirect fsnotify DSN; "" until Ready
-	DSNFilePath string
-	Err         string // actionable, per-dependency; "" on success
+	Name        string `json:"name"`
+	Engine      Engine `json:"engine"`
+	State       State  `json:"state"`
+	EnvVarName  string `json:"env_var_name,omitempty"`
+	EnvVarValue string `json:"env_var_value,omitempty"` // indirect fsnotify DSN; "" until Ready
+	DSNFilePath string `json:"dsn_file_path,omitempty"`
+	Err         string `json:"error,omitempty"` // actionable, per-dependency; "" on success
 }
 
 // Ready reports whether the dependency reached the Ready state.
@@ -118,6 +120,22 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 	res.EnvVarValue = dsn.IndirectEnv(string(d.Engine), path)
 	res.State = StateReady
 	return res
+}
+
+// Release tears down a service's dependencies: it removes each DSN file and,
+// when clean is set, drops only that service's isolation slice (never the shared
+// instance). Default (clean=false) is non-destructive — data persists (FR-005/7).
+func (r *Reconciler) Release(ctx context.Context, service string, deps []Dep, clean bool) error {
+	var errs []error
+	for _, d := range deps {
+		_ = os.Remove(dsn.FilePath(r.baseDir, service, d.Name))
+		if clean {
+			if err := r.prov.DropDatabase(ctx, IdentityBinding(service, d)); err != nil {
+				errs = append(errs, fmt.Errorf("drop %s/%s: %w", service, d.Name, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // waitReady polls the provisioner's readiness probe with backoff, bounded by the

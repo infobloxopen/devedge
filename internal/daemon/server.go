@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/infobloxopen/devedge/internal/certs"
+	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/dnsserver"
 	"github.com/infobloxopen/devedge/internal/proxy"
 	"github.com/infobloxopen/devedge/internal/reconciler"
@@ -78,6 +79,8 @@ type Server struct {
 	dnsAddr       string
 	dnsSource     dnsserver.SuffixSource
 	manageTraefik bool
+	prov          depruntime.Provisioner
+	depBaseDir    string
 	reg           *registry.Registry
 	rec           *reconciler.Reconciler
 	api           *API
@@ -131,6 +134,18 @@ func WithServerLogger(l *slog.Logger) ServerOption {
 	return func(s *Server) { s.logger = l }
 }
 
+// WithProvisioner injects the dependency-runtime Provisioner. Defaults to a
+// Helm-backed provisioner on the current kube context; tests inject a fake.
+func WithProvisioner(p depruntime.Provisioner) ServerOption {
+	return func(s *Server) { s.prov = p }
+}
+
+// WithDepBaseDir overrides the base directory under which per-service DSN files
+// are written (default: the devedge home). Tests point this at a temp dir.
+func WithDepBaseDir(dir string) ServerOption {
+	return func(s *Server) { s.depBaseDir = dir }
+}
+
 // NewServer creates a Server with the given options.
 func NewServer(opts ...ServerOption) *Server {
 	home, _ := os.UserHomeDir()
@@ -164,7 +179,17 @@ func NewServer(opts ...ServerOption) *Server {
 	s.rec = reconciler.New(s.configDir, s.reg, recOpts...)
 	s.reg.SetOnChange(s.rec.OnEvent)
 
-	s.api = NewAPI(s.reg, s.logger)
+	// Dependency runtime: a Helm-backed provisioner by default (tests inject a
+	// fake), writing DSN files under the devedge home unless overridden.
+	if s.prov == nil {
+		s.prov = depruntime.NewHelmProvisioner("")
+	}
+	if s.depBaseDir == "" {
+		s.depBaseDir = devedgeDir()
+	}
+	depMgr := NewDepManager(depruntime.NewReconciler(s.prov, s.depBaseDir, 0), s.logger)
+
+	s.api = NewAPI(s.reg, depMgr, s.logger)
 	return s
 }
 

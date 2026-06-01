@@ -67,24 +67,33 @@ func newPassword() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// NewBinding builds the isolation identity for a (service, dep). The password is
-// freshly generated; callers persist it via the DSN file, not the daemon store.
-func NewBinding(service string, d Dep) (Binding, error) {
-	pw, err := newPassword()
-	if err != nil {
-		return Binding{}, err
-	}
+// IdentityBinding builds the deterministic, password-free identity of a
+// (service, dep) binding — its database/role/namespace. Enough to drop the slice;
+// used by Release where the password is irrelevant.
+func IdentityBinding(service string, d Dep) Binding {
 	b := Binding{
 		Service:    service,
 		Dependency: d.Name,
 		Engine:     d.Engine,
 		Database:   DatabaseName(service, d.Name),
 		User:       RoleName(service, d.Name),
-		Password:   pw,
 	}
 	if d.Engine == EngineRedis {
 		b.KeyNamespace = KeyNamespace(service, d.Name)
 		b.Database = "0" // logical DB index; isolation is via ACL user + key namespace
 	}
+	return b
+}
+
+// NewBinding builds the full isolation identity for a (service, dep), including a
+// freshly generated password. Callers persist the password via the DSN file, not
+// the daemon store.
+func NewBinding(service string, d Dep) (Binding, error) {
+	pw, err := newPassword()
+	if err != nil {
+		return Binding{}, err
+	}
+	b := IdentityBinding(service, d)
+	b.Password = pw
 	return b, nil
 }

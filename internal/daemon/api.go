@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/pkg/types"
 )
@@ -14,21 +15,75 @@ import (
 // API exposes the route registry over HTTP.
 type API struct {
 	reg    *registry.Registry
+	deps   *DepManager
 	logger *slog.Logger
 	mux    *http.ServeMux
 }
 
-// NewAPI creates an HTTP API backed by the given registry.
-func NewAPI(reg *registry.Registry, logger *slog.Logger) *API {
-	a := &API{reg: reg, logger: logger, mux: http.NewServeMux()}
+// NewAPI creates an HTTP API backed by the given registry and (optional)
+// dependency manager. The route endpoints are unchanged; dependency endpoints
+// are additive (a nil deps manager disables them with 501).
+func NewAPI(reg *registry.Registry, deps *DepManager, logger *slog.Logger) *API {
+	a := &API{reg: reg, deps: deps, logger: logger, mux: http.NewServeMux()}
 	a.mux.HandleFunc("GET /v1/routes", a.listRoutes)
 	a.mux.HandleFunc("GET /v1/routes/{host}", a.getRoute)
 	a.mux.HandleFunc("PUT /v1/routes", a.registerRoute)
 	a.mux.HandleFunc("DELETE /v1/routes/{host}", a.deregisterRoute)
 	a.mux.HandleFunc("DELETE /v1/projects/{project}", a.deregisterProject)
 	a.mux.HandleFunc("GET /v1/status", a.status)
+	// Dependency runtime (additive; route API above is unchanged).
+	a.mux.HandleFunc("PUT /v1/services/{service}/dependencies", a.applyDependencies)
+	a.mux.HandleFunc("GET /v1/services/{service}/dependencies", a.getDependencies)
+	a.mux.HandleFunc("DELETE /v1/services/{service}/dependencies", a.releaseDependencies)
 	addUIRoutes(a.mux, reg)
 	return a
+}
+
+// DependencyRequest is one declared dependency in a PUT .../dependencies body.
+type DependencyRequest struct {
+	Name    string `json:"name"`
+	Engine  string `json:"engine"`
+	Version string `json:"version,omitempty"`
+	Port    int    `json:"port,omitempty"`
+}
+
+func (a *API) applyDependencies(w http.ResponseWriter, r *http.Request) {
+	if a.deps == nil {
+		http.Error(w, "dependency runtime not enabled", http.StatusNotImplemented)
+		return
+	}
+	var reqs []DependencyRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqs); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	deps := make([]depruntime.Dep, len(reqs))
+	for i, q := range reqs {
+		deps[i] = depruntime.Dep{Name: q.Name, Engine: depruntime.Engine(q.Engine), Version: q.Version, Port: q.Port}
+	}
+	results := a.deps.Apply(r.Context(), r.PathValue("service"), deps)
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (a *API) getDependencies(w http.ResponseWriter, r *http.Request) {
+	if a.deps == nil {
+		http.Error(w, "dependency runtime not enabled", http.StatusNotImplemented)
+		return
+	}
+	writeJSON(w, http.StatusOK, a.deps.Get(r.PathValue("service")))
+}
+
+func (a *API) releaseDependencies(w http.ResponseWriter, r *http.Request) {
+	if a.deps == nil {
+		http.Error(w, "dependency runtime not enabled", http.StatusNotImplemented)
+		return
+	}
+	clean := r.URL.Query().Get("clean") == "true"
+	if err := a.deps.Release(r.Context(), r.PathValue("service"), clean); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Handler returns the http.Handler for the API.
