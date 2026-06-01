@@ -250,13 +250,18 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 			if len(routes) == 0 {
 				fmt.Printf("no routes declared in %s\n", file)
 			}
-			if dd, ok := res.(config.DependencyDeclarer); ok {
-				if report := config.FormatDependencies(dd.Dependencies()); report != "" {
-					fmt.Println(report)
+
+			c := newClient()
+
+			// Start declared dependencies (FR-001). Engaged only when a Service
+			// declares dependencies — kind: Config and no-deps Services are
+			// unaffected (FR-013).
+			if dd, ok := res.(config.DependencyDeclarer); ok && len(dd.Dependencies()) > 0 {
+				if err := provisionDependencies(c, res.Project(), dd.Dependencies()); err != nil {
+					return err
 				}
 			}
 
-			c := newClient()
 			var reqs []daemon.RegisterRequest
 			for _, r := range routes {
 				req := daemon.RegisterRequest{
@@ -308,6 +313,7 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 
 func projectDownCmd() *cobra.Command {
 	var project string
+	var clean bool
 
 	cmd := &cobra.Command{
 		Use:   "down [PROJECT]",
@@ -332,9 +338,20 @@ func projectDownCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("removed %d route(s) for project %s\n", n, colorHost.Sprint(project))
+
+			// Release any declared dependencies for this service. Default keeps
+			// data (FR-005/FR-007); --clean drops this service's data (FR-006).
+			// A no-op for projects that declared none.
+			if err := c.ReleaseDependencies(context.Background(), project, clean); err != nil {
+				return fmt.Errorf("release dependencies: %w", err)
+			}
+			if clean {
+				fmt.Printf("dropped dependency data for project %s\n", colorHost.Sprint(project))
+			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&clean, "clean", false, "also destroy this project's dependency data (default keeps it)")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "project name")
 	return cmd
 }

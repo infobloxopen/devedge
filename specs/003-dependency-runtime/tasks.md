@@ -85,8 +85,8 @@ connect with the reported DSN, create+query a table; `de project down` releases 
 ### Implementation
 
 - [X] T018 [S] [US1] Add `Dependency` helpers (default port, env-var name, DSN file path) in `pkg/config/service.go` — additive only; the 002 schema is frozen. (depends on T017)
-- [ ] T019 [C] [US1] In `cmd/de/main.go` `projectUpCmd`, when the resource declares dependencies, send them to the daemon, wait for readiness, and print per-dependency the env var + DSN-file path + "ready" (replacing 002's "not yet supported"); per-dependency failures exit non-zero and are retryable. A no-deps `Service`/`Config` is unchanged (FR-013). (depends on T013, T011, T002)
-- [ ] T020 [S] [US1] In `cmd/de/main.go` `projectDownCmd`, release the service's dependencies via the daemon (default: keep data) alongside existing route deregistration; co-located services unaffected. (depends on T013)
+- [X] T019 [C] [US1] In `cmd/de/main.go` `projectUpCmd`, when the resource declares dependencies, send them to the daemon, wait for readiness, and print per-dependency the env var + DSN-file path + "ready" (replacing 002's "not yet supported"); per-dependency failures exit non-zero and are retryable. A no-deps `Service`/`Config` is unchanged (FR-013). (depends on T013, T011, T002)
+- [X] T020 [S] [US1] In `cmd/de/main.go` `projectDownCmd`, release the service's dependencies via the daemon (default: keep data) alongside existing route deregistration; co-located services unaffected. (depends on T013)
 
 **Checkpoint**: a Postgres dependency is started, reachable, and reported; up/down work; route path unchanged.
 
