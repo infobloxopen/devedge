@@ -71,6 +71,8 @@ See `.claude/skills/README.md` for the template and conventions.
 - No new persistent storage. The set of authoritative DNS suffixes (001-fix-dns-udp-bind)
 - Go 1.25.5 (from `go.mod`) + `gopkg.in/yaml.v3` (already in use); standard library (002-service-config-kind)
 - N/A (parses a local YAML file; no persistence added) (002-service-config-kind)
+- Go 1.25.5 + `helm`/`kubectl`/`k3d` CLIs (subprocess; no Helm SDK / client-go), `go:embed` Helm charts, `gopkg.in/yaml.v3` (003-dependency-runtime)
+- Shared Postgres/Redis in-cluster (Helm, PVC-backed); real-DSN files under `~/.devedge/`; no DB in devedge itself (003-dependency-runtime)
 
 ## Recent Changes
 - 001-fix-dns-udp-bind: Added Go 1.25.5 (from `go.mod`)
