@@ -210,7 +210,8 @@ de ls [--json]
 de inspect HOST
 
 de project up [-f devedge.yaml] [--watch]
-de project down [PROJECT]
+de project down [PROJECT] [--clean]
+de project chart [-f devedge.yaml] [-o DIR]
 
 de cluster create CLUSTER [--port 8081]
 de cluster delete CLUSTER
@@ -263,7 +264,7 @@ metadata:
 spec:
   dev:
     hostname: webhooks.dev.test    # required; valid hostname
-  dependencies:                    # optional; declared and reported, not yet started
+  dependencies:                    # optional; started on `de project up`
     - name: db
       engine: postgres             # postgres | redis
       version: "16"                # optional
@@ -276,9 +277,37 @@ spec:
       upstream: http://127.0.0.1:8080
 ```
 
-`de project up` registers the routes and reports any declared dependencies (starting them is
-not yet supported). The full schema and error contract are documented in
+`de project up` registers the routes and **starts the declared dependencies**. The full schema and
+error contract are documented in
 [`specs/002-service-config-kind/contracts/service-config.md`](specs/002-service-config-kind/contracts/service-config.md).
+
+#### Dependency runtime
+
+When a `Service` declares dependencies, `de project up` makes them real and reachable (requires the
+`helm`, `kubectl`, and `k3d` CLIs):
+
+- **Shared instance per engine, isolated per service.** devedge runs one Postgres and one Redis in
+  the dev cluster (installed via Helm) and gives each service its own database + credentials
+  (Postgres) or ACL user + key namespace (Redis), so co-located services never see each other's data.
+- **Connection by hotload DSN.** For each dependency devedge writes the real DSN to
+  `~/.devedge/services/<service>/<dep>.dsn` (mode `0600`) and reports an **indirect** env var the app
+  consumes — e.g. `DATABASE_URL=fsnotify://postgres/<path-to-file>` (the
+  [`infobloxopen/hotload`](https://github.com/infobloxopen/hotload) pattern; the app reads the real
+  DSN from the file and hot-reloads on change). The same shape is emitted for every engine
+  (`REDIS_URL=fsnotify://redis/<path>`).
+
+```bash
+de project up               # starts deps, prints each env var + DSN file, then registers routes
+de project down             # releases deps; KEEPS data by default
+de project down --clean     # also drops this service's database/keys
+de project chart -o ./chart # emit a Helm chart for the service + abstract dependency claims
+```
+
+Data persists across `down`/`up`; `--clean` drops only the requesting service's data, never the
+shared instance. `de project chart` emits (does not deploy) a Helm chart expressing dependencies as
+abstract claims, so the same declaration maps to a shared logical database in dev and a dedicated
+instance in a real cluster. See
+[`specs/003-dependency-runtime/`](specs/003-dependency-runtime/) for the design and contract.
 
 ## Development
 

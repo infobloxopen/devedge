@@ -75,30 +75,6 @@ func TestParseService_dependency_port_out_of_range(t *testing.T) {
 	}
 }
 
-func TestFormatDependencies(t *testing.T) {
-	deps := []Dependency{
-		{Name: "db", Engine: "postgres", Port: 5432},
-		{Name: "cache", Engine: "redis", Port: 6379},
-	}
-	out := FormatDependencies(deps)
-	if !strings.Contains(out, "2") {
-		t.Errorf("output %q should report the count", out)
-	}
-	for _, n := range []string{"db", "cache"} {
-		if !strings.Contains(out, n) {
-			t.Errorf("output %q should name dependency %q", out, n)
-		}
-	}
-	if !strings.Contains(out, "starting dependencies is not yet supported") {
-		t.Errorf("output %q should state starting is not yet supported", out)
-	}
-}
-
-func TestFormatDependencies_none(t *testing.T) {
-	if out := FormatDependencies(nil); out != "" {
-		t.Errorf("expected empty output for no dependencies, got %q", out)
-	}
-}
 
 func TestParseService_missing_name(t *testing.T) {
 	input := []byte(`

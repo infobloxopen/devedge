@@ -148,29 +148,6 @@ func (c *ServiceConfig) Validate() error {
 	return nil
 }
 
-// FormatDependencies renders a human-readable report of a service's declared
-// runtime dependencies for `de project up`. It returns "" when there are none.
-// Dependencies are validated but not started by this feature, so the report
-// states that explicitly.
-func FormatDependencies(deps []Dependency) string {
-	if len(deps) == 0 {
-		return ""
-	}
-	names := make([]string, len(deps))
-	for i, d := range deps {
-		names[i] = d.Name
-	}
-	return fmt.Sprintf("%d dependenc%s declared: %s\nstarting dependencies is not yet supported",
-		len(deps), plural(len(deps)), strings.Join(names, ", "))
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return "y"
-	}
-	return "ies"
-}
-
 // Project returns the service name from metadata.
 func (c *ServiceConfig) Project() string {
 	return c.Metadata.Name

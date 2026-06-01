@@ -182,8 +182,8 @@ namespaces; each sees only its own keys; both reachable; `down --clean` drops on
 
 - [X] T036 [P] [S] **DK regression** test in `test/integration/`: a `kind: Config` file routes via `de project up`/`down` exactly as before, and `PUT /v1/routes` + `DELETE /v1/projects/{project}` at `:15353` are unchanged — proving `platform.data.kit`'s surface is intact (see plan "Backward compatibility & external consumers").
 - [X] T037 [S] **Observability (Constitution V)**: emit structured logs on each dependency provision/teardown (desired vs observed state) and assert `GET /v1/services/{svc}/dependencies` reflects per-dependency `State` without raw credentials — mirroring the existing route-mutation observability. (depends on T012, T013)
-- [ ] T038 [P] [S] Update `README.md` (Service dependency runtime: `up`/`down`/`--clean`/`chart`, the `fsnotify://` DSN convention for both engines, required `helm`/`kubectl`/`k3d`) and verify `specs/003-dependency-runtime/quickstart.md` matches the shipped commands.
-- [ ] T039 [S] Run the QA gate (the `after_implement` `verify-change` hook): `make build` + `make lint` + unit + integration; e2e (k3d) since this touches cluster orchestration/DNS/routing — CI provides a dedicated k3d; on a dev machine use the shared k3d if present, else report **skipped** (never claim passed); co-existence-safe. Then the scope check against this spec's acceptance criteria.
+- [X] T038 [P] [S] Update `README.md` (Service dependency runtime: `up`/`down`/`--clean`/`chart`, the `fsnotify://` DSN convention for both engines, required `helm`/`kubectl`/`k3d`) and verify `specs/003-dependency-runtime/quickstart.md` matches the shipped commands.
+- [X] T039 [S] Run the QA gate (the `after_implement` `verify-change` hook): `make build` + `make lint` + unit + integration; e2e (k3d) since this touches cluster orchestration/DNS/routing — CI provides a dedicated k3d; on a dev machine use the shared k3d if present, else report **skipped** (never claim passed); co-existence-safe. Then the scope check against this spec's acceptance criteria.
 
 ---
 
