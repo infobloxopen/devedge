@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "devedge-postgres.fullname" . }}
+  labels:
+    {{- include "devedge-postgres.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "devedge-postgres.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: {{ .Values.port }}
+      targetPort: postgres
+      protocol: TCP

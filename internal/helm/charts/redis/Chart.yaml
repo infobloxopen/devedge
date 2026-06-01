@@ -1,0 +1,6 @@
+apiVersion: v2
+name: devedge-redis
+description: Shared Redis backing instance for the devedge dev environment
+type: application
+version: 0.1.0
+appVersion: "7"

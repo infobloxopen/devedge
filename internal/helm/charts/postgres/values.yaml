@@ -1,0 +1,11 @@
+image:
+  repository: postgres
+  tag: "16"
+
+port: 5432
+
+auth:
+  postgresPassword: devedge
+
+storage:
+  size: 1Gi

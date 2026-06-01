@@ -1,0 +1,12 @@
+image:
+  repository: redis
+  tag: "7"
+
+port: 6379
+
+auth:
+  enabled: false
+  password: ""
+
+storage:
+  size: 1Gi

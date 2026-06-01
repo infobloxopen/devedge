@@ -31,7 +31,7 @@ CLI in `cmd/de/`; tests in `test/integration/` and `test/e2e/`.
 
 **Purpose**: Establish the backward-compatibility baseline and tool preflight before any edits.
 
-- [ ] T001 [S] Confirm baseline is green on branch `003-dependency-runtime`: run `make build` and `make test`; record that the existing route/daemon tests and `pkg/config` tests pass unchanged (the 002 + route-API back-compat oracle).
+- [X] T001 [S] Confirm baseline is green on branch `003-dependency-runtime`: run `make build` and `make test`; record that the existing route/daemon tests and `pkg/config` tests pass unchanged (the 002 + route-API back-compat oracle).
 - [ ] T002 [S] Add a CLI preflight in `cmd/de/` that detects `helm`/`kubectl`/`k3d` on PATH and fails with one actionable message naming the missing tool (used by the dependency path only; never triggered for `kind: Config` or no-deps `Service`). Unit-test the message.
 
 ---
@@ -47,18 +47,18 @@ plan "Backward compatibility & external consumers"): the route registry/reconcil
 
 ### Tests (write first, must FAIL)
 
-- [ ] T003 [P] [S] Golden-render tests in `internal/helm/helm_test.go`: `helm template` of the embedded `postgres` and `redis` charts is deterministic and contains a StatefulSet + Service + PVC in the `devedge-deps` namespace. (skipped-with-reason if `helm` absent)
-- [ ] T004 [P] [S] Unit tests in `internal/dsn/dsn_test.go`: for postgres and redis, the env-var value is the indirect `fsnotify://<driver>/<abs-path>` form and the file holds the real DSN; the same shape is produced for **both** engines; the file is written `0600` atomically.
-- [ ] T005 [P] [C] Reconcile tests in `internal/depruntime/reconcile_test.go` against the **fake** `Provisioner`: desired→Ready state transitions; idempotent re-reconcile (no duplicate provisioning, no data loss); a bounded-timeout readiness failure surfaces per-dependency and leaves no half-state (FR-008/FR-009).
+- [X] T003 [P] [S] Golden-render tests in `internal/helm/helm_test.go`: `helm template` of the embedded `postgres` and `redis` charts is deterministic and contains a StatefulSet + Service + PVC in the `devedge-deps` namespace. (skipped-with-reason if `helm` absent)
+- [X] T004 [P] [S] Unit tests in `internal/dsn/dsn_test.go`: for postgres and redis, the env-var value is the indirect `fsnotify://<driver>/<abs-path>` form and the file holds the real DSN; the same shape is produced for **both** engines; the file is written `0600` atomically.
+- [X] T005 [P] [C] Reconcile tests in `internal/depruntime/reconcile_test.go` against the **fake** `Provisioner`: desired→Ready state transitions; idempotent re-reconcile (no duplicate provisioning, no data loss); a bounded-timeout readiness failure surfaces per-dependency and leaves no half-state (FR-008/FR-009).
 - [ ] T006 [P] [S] Daemon API tests in `test/integration/dependency_api_test.go`: the **existing** `PUT /v1/routes`, `DELETE /v1/projects/{project}`, `GET /v1/status` are unchanged (path/port/shape); the new `PUT/GET/DELETE /v1/services/{svc}/dependencies` upsert/report/release and never echo raw credentials. (DK regression oracle)
 
 ### Implementation
 
-- [ ] T007 [C] Implement the embedded Helm charts in `internal/helm/charts/{postgres,redis}` (StatefulSet + headless Service + PVC, official images, `devedge-deps` namespace) and `internal/helm/embed.go` (`//go:embed`). (depends on T003)
-- [ ] T008 [C] Implement the `helm` CLI adapter in `internal/helm/helm.go`: `Render` (helm template), `Install` (helm upgrade --install --kubeconfig), `Uninstall`, `Lint` — via `os/exec`, deterministic, with actionable errors. (depends on T003, T007)
-- [ ] T009 [S] Implement `internal/dsn/dsn.go`: build the real DSN per engine, the indirect `fsnotify://<driver>/<file>` env value (uniform for postgres + redis), file-path derivation under `~/.devedge/services/<service>/`, and atomic `0600` write. (depends on T004)
+- [X] T007 [C] Implement the embedded Helm charts in `internal/helm/charts/{postgres,redis}` (StatefulSet + headless Service + PVC, official images, `devedge-deps` namespace) and `internal/helm/embed.go` (`//go:embed`). (depends on T003)
+- [X] T008 [C] Implement the `helm` CLI adapter in `internal/helm/helm.go`: `Render` (helm template), `Install` (helm upgrade --install --kubeconfig), `Uninstall`, `Lint` — via `os/exec`, deterministic, with actionable errors. (depends on T003, T007)
+- [X] T009 [S] Implement `internal/dsn/dsn.go`: build the real DSN per engine, the indirect `fsnotify://<driver>/<file>` env value (uniform for postgres + redis), file-path derivation under `~/.devedge/services/<service>/`, and atomic `0600` write. (depends on T004)
 - [ ] T010 [C] Implement the `Provisioner` adapter in `internal/depruntime/provisioner.go`: interface (`EnsureInstance`, `EnsureDatabase`, `DropDatabase`, `Ready`) + a real impl wrapping `internal/helm` (instance) and a new `internal/cluster/exec.go` `kubectlExec` helper (psql/redis-cli for db/role/ACL), + a **fake** for tests. (depends on T005, T008)
-- [ ] T011 [C] Implement `internal/depruntime/desired.go` + `reconcile.go`: derive desired state from a Service's dependencies; idempotent converge (ensure instance → provision isolation → write DSN → readiness probe), per-dependency errors, bounded timeout. (depends on T005, T009, T010)
+- [X] T011 [C] Implement `internal/depruntime/desired.go` + `reconcile.go`: derive desired state from a Service's dependencies; idempotent converge (ensure instance → provision isolation → write DSN → readiness probe), per-dependency errors, bounded timeout. (depends on T005, T009, T010)
 - [ ] T012 [C] Implement `internal/daemon/depstore.go` (desired-dependency registry mirroring `registry.go`: event-driven, thread-safe) and wire a `internal/reconciler/dependency.go` that converges via `depruntime.Reconcile` **beside** the route reconciler without altering it. (depends on T011)
 - [ ] T013 [S] Add the additive daemon endpoints in `internal/daemon/api.go` (`PUT/GET/DELETE /v1/services/{svc}/dependencies`; `GET` never returns raw creds/DSN) and the matching client methods in `internal/client/client.go`. (depends on T006, T012)
 - [ ] T014 [C] Add a TCP entrypoint + catch-all `HostSNI("*")` router per dependency engine (`postgres`/`redis` on `5432`/`6379` at the EdgeIP) in `internal/render/traefik.go`, plus the stable-hostname registration — **without** changing existing HTTP/TCP route rendering. (depends on T012)
@@ -103,7 +103,7 @@ in each; confirm each sees only its own and both are reachable.
 ### Tests (write first, must FAIL)
 
 - [ ] T021 [P] [C] [US2] Integration test (fake provisioner) in `test/integration/dependency_runtime_test.go`: two services with dep name `db` get distinct database/role/password; cross-access is denied; one service's `down` leaves the other intact.
-- [ ] T022 [P] [S] [US2] Unit test in `internal/depruntime/desired_test.go`: per-(service,dependency) identifier derivation is deterministic, sanitized, and collision-avoided.
+- [X] T022 [P] [S] [US2] Unit test in `internal/depruntime/desired_test.go`: per-(service,dependency) identifier derivation is deterministic, sanitized, and collision-avoided.
 
 ### Implementation
 
@@ -168,7 +168,7 @@ namespaces; each sees only its own keys; both reachable; `down --clean` drops on
 
 - [ ] T032 [P] [C] [US2] Redis isolation integration test in `test/integration/dependency_runtime_test.go` (fake provisioner): two services with a `redis` dep get distinct ACL user + key namespace / logical DB index; cross-namespace access is denied; one service's `down` leaves the other intact. (mirrors T021 for Redis)
 - [ ] T033 [P] [C] [US1] Redis connectivity e2e in `test/e2e/dependency_redis_test.go` (k3d): Helm-install the shared Redis, provision a service's ACL user + namespace, connect over the reported DSN, SET/GET a key, and confirm persistence across `down`/`up` and `--clean` wipe. **Skipped-with-reason** when Docker/k3d/helm absent. (mirrors T016/T026 for Redis)
-- [ ] T034 [P] [S] Test in `internal/depruntime/reconcile_test.go`: a recognized engine without runtime support fails **by name**, actionable and retryable (FR-012, SC-005 unsupported-engine branch).
+- [X] T034 [P] [S] Test in `internal/depruntime/reconcile_test.go`: a recognized engine without runtime support fails **by name**, actionable and retryable (FR-012, SC-005 unsupported-engine branch).
 
 ### Implementation
 
