@@ -198,3 +198,15 @@ func (c *ServiceConfig) ToRoutes() ([]types.Route, error) {
 func (c *ServiceConfig) Dependencies() []Dependency {
 	return c.Spec.Dependencies
 }
+
+// enginePorts maps a recognized engine to its standard port.
+var enginePorts = map[string]int{"postgres": 5432, "redis": 6379}
+
+// DefaultedPort returns the declared port, falling back to the engine's standard
+// port when unset. Returns 0 for an unrecognized engine.
+func (d Dependency) DefaultedPort() int {
+	if d.Port != 0 {
+		return d.Port
+	}
+	return enginePorts[d.Engine]
+}
