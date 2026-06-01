@@ -123,7 +123,7 @@ in each; confirm each sees only its own and both are reachable.
 ### Tests (write first, must FAIL)
 
 - [X] T025 [P] [S] [US3] Integration test (fake provisioner): default `down` keeps the binding's data; `down --clean` calls `DropDatabase` for **only** that service; the shared instance/PVC are never dropped.
-- [ ] T026 [P] [C] [US3] e2e (k3d) addition in `test/e2e/dependency_postgres_test.go`: write → `down` → `up` retains data; `down --clean` → `up` starts empty. Skipped-with-reason when k3d absent.
+- [X] T026 [P] [C] [US3] e2e (k3d) addition in `test/e2e/dependency_postgres_test.go`: write → `down` → `up` retains data; `down --clean` → `up` starts empty. Skipped-with-reason when k3d absent.
 
 ### Implementation
 
@@ -144,12 +144,12 @@ valid service-only chart.
 
 ### Tests (write first, must FAIL)
 
-- [ ] T029 [P] [S] [US4] Golden-render + `helm lint` test in `internal/helm/helm_test.go` for the `service` chart: deterministic output; claim + secret templates present and **separable** from `deployment.yaml` (BYO-seam, plan decision 7); a no-deps Service renders a valid service-only chart. (skipped-with-reason if `helm` absent)
+- [X] T029 [P] [S] [US4] Golden-render + `helm lint` test in `internal/helm/helm_test.go` for the `service` chart: deterministic output; claim + secret templates present and **separable** from `deployment.yaml` (BYO-seam, plan decision 7); a no-deps Service renders a valid service-only chart. (skipped-with-reason if `helm` absent)
 
 ### Implementation
 
-- [ ] T030 [C] [US4] Implement the embedded `internal/helm/charts/service` chart: `Chart.yaml`, `values.yaml` (service + `dependencies` list), `templates/deployment.yaml`, and **separable** `templates/dependency-claim.yaml` + `templates/dependency-secret.yaml` (abstract claim + `fsnotify://` env/secret; FR-011 + BYO seam). (depends on T007)
-- [ ] T031 [S] [US4] Implement `cmd/de/chart.go` (`de project chart [-o OUTDIR]`): materialize the `service` chart from the loaded `Service`, fill the `dependencies` values, run `helm lint`; emit only (no deploy). (depends on T030, T008)
+- [X] T030 [C] [US4] Implement the embedded `internal/helm/charts/service` chart: `Chart.yaml`, `values.yaml` (service + `dependencies` list), `templates/deployment.yaml`, and **separable** `templates/dependency-claim.yaml` + `templates/dependency-secret.yaml` (abstract claim + `fsnotify://` env/secret; FR-011 + BYO seam). (depends on T007)
+- [X] T031 [S] [US4] Implement `cmd/de/chart.go` (`de project chart [-o OUTDIR]`): materialize the `service` chart from the loaded `Service`, fill the `dependencies` values, run `helm lint`; emit only (no deploy). (depends on T030, T008)
 
 **Checkpoint**: chart emitted, lints clean, dependencies abstract; SC-004 holds.
 
@@ -166,13 +166,13 @@ namespaces; each sees only its own keys; both reachable; `down --clean` drops on
 
 ### Tests (write first, must FAIL)
 
-- [ ] T032 [P] [C] [US2] Redis isolation integration test in `test/integration/dependency_runtime_test.go` (fake provisioner): two services with a `redis` dep get distinct ACL user + key namespace / logical DB index; cross-namespace access is denied; one service's `down` leaves the other intact. (mirrors T021 for Redis)
-- [ ] T033 [P] [C] [US1] Redis connectivity e2e in `test/e2e/dependency_redis_test.go` (k3d): Helm-install the shared Redis, provision a service's ACL user + namespace, connect over the reported DSN, SET/GET a key, and confirm persistence across `down`/`up` and `--clean` wipe. **Skipped-with-reason** when Docker/k3d/helm absent. (mirrors T016/T026 for Redis)
+- [X] T032 [P] [C] [US2] Redis isolation integration test in `test/integration/dependency_runtime_test.go` (fake provisioner): two services with a `redis` dep get distinct ACL user + key namespace / logical DB index; cross-namespace access is denied; one service's `down` leaves the other intact. (mirrors T021 for Redis)
+- [X] T033 [P] [C] [US1] Redis connectivity e2e in `test/e2e/dependency_redis_test.go` (k3d): Helm-install the shared Redis, provision a service's ACL user + namespace, connect over the reported DSN, SET/GET a key, and confirm persistence across `down`/`up` and `--clean` wipe. **Skipped-with-reason** when Docker/k3d/helm absent. (mirrors T016/T026 for Redis)
 - [X] T034 [P] [S] Test in `internal/depruntime/reconcile_test.go`: a recognized engine without runtime support fails **by name**, actionable and retryable (FR-012, SC-005 unsupported-engine branch).
 
 ### Implementation
 
-- [ ] T035 [C] [US2] Implement Redis isolation in the `Provisioner` (`EnsureDatabase` for redis = `ACL SETUSER` with a per-service user + key-namespace prefix and/or logical DB index, idempotent; `Ready` = `PING`) so two services never collide, and ensure `DropDatabase` (T028) targets only the requester's Redis slice. (depends on T010, T011, T028)
+- [X] T035 [C] [US2] Implement Redis isolation in the `Provisioner` (`EnsureDatabase` for redis = `ACL SETUSER` with a per-service user + key-namespace prefix and/or logical DB index, idempotent; `Ready` = `PING`) so two services never collide, and ensure `DropDatabase` (T028) targets only the requester's Redis slice. (depends on T010, T011, T028)
 
 **Checkpoint**: Redis at parity with Postgres across US1–US3; SC-002/SC-003 hold for both engines; FR-012 unsupported-engine path covered.
 
@@ -180,7 +180,7 @@ namespaces; each sees only its own keys; both reachable; `down --clean` drops on
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T036 [P] [S] **DK regression** test in `test/integration/`: a `kind: Config` file routes via `de project up`/`down` exactly as before, and `PUT /v1/routes` + `DELETE /v1/projects/{project}` at `:15353` are unchanged — proving `platform.data.kit`'s surface is intact (see plan "Backward compatibility & external consumers").
+- [X] T036 [P] [S] **DK regression** test in `test/integration/`: a `kind: Config` file routes via `de project up`/`down` exactly as before, and `PUT /v1/routes` + `DELETE /v1/projects/{project}` at `:15353` are unchanged — proving `platform.data.kit`'s surface is intact (see plan "Backward compatibility & external consumers").
 - [X] T037 [S] **Observability (Constitution V)**: emit structured logs on each dependency provision/teardown (desired vs observed state) and assert `GET /v1/services/{svc}/dependencies` reflects per-dependency `State` without raw credentials — mirroring the existing route-mutation observability. (depends on T012, T013)
 - [ ] T038 [P] [S] Update `README.md` (Service dependency runtime: `up`/`down`/`--clean`/`chart`, the `fsnotify://` DSN convention for both engines, required `helm`/`kubectl`/`k3d`) and verify `specs/003-dependency-runtime/quickstart.md` matches the shipped commands.
 - [ ] T039 [S] Run the QA gate (the `after_implement` `verify-change` hook): `make build` + `make lint` + unit + integration; e2e (k3d) since this touches cluster orchestration/DNS/routing — CI provides a dedicated k3d; on a dev machine use the shared k3d if present, else report **skipped** (never claim passed); co-existence-safe. Then the scope check against this spec's acceptance criteria.

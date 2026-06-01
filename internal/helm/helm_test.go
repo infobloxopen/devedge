@@ -15,6 +15,56 @@ func requireHelm(t *testing.T) {
 	}
 }
 
+// T029: the service chart renders the service Deployment plus a separable abstract
+// claim + DSN secret per dependency, and is valid with no dependencies.
+func TestServiceChart_render(t *testing.T) {
+	requireHelm(t)
+	h := New("")
+	values := map[string]any{
+		"service": map[string]any{"name": "webhooks", "image": "example/webhooks:dev", "port": 8080, "replicas": 1},
+		"dependencies": []any{
+			map[string]any{"name": "db", "engine": "postgres", "version": "16", "envVar": "DATABASE_URL"},
+		},
+	}
+	out, err := h.Render(context.Background(), ChartService, "webhooks", "default", values)
+	if err != nil {
+		t.Fatalf("render service chart: %v", err)
+	}
+	for _, want := range []string{"kind: Deployment", "kind: DependencyClaim", "kind: Secret", "DATABASE_URL", "engine: postgres"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("service chart render missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestServiceChart_noDeps(t *testing.T) {
+	requireHelm(t)
+	h := New("")
+	values := map[string]any{"service": map[string]any{"name": "webhooks", "image": "x", "port": 8080, "replicas": 1}}
+	out, err := h.Render(context.Background(), ChartService, "webhooks", "default", values)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(out, "kind: Deployment") || !strings.Contains(out, "kind: Service") {
+		t.Errorf("no-deps service chart should still have a Deployment + Service:\n%s", out)
+	}
+	if strings.Contains(out, "DependencyClaim") {
+		t.Errorf("no-deps service chart must not emit a DependencyClaim")
+	}
+}
+
+// T029: a written-out service chart passes `helm lint`.
+func TestWriteChart_lints(t *testing.T) {
+	requireHelm(t)
+	dir := t.TempDir()
+	if err := WriteChart(ChartService, dir); err != nil {
+		t.Fatalf("WriteChart: %v", err)
+	}
+	if err := New("").Lint(context.Background(), dir); err != nil {
+		t.Fatalf("emitted chart failed helm lint: %v", err)
+	}
+}
+
 func TestMaterializeChart_unknown(t *testing.T) {
 	if _, _, err := MaterializeChart("nope"); err == nil {
 		t.Fatal("expected error for unknown chart")

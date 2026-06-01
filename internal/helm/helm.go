@@ -90,6 +90,36 @@ func MaterializeChart(name string) (dir string, cleanup func(), err error) {
 	return tmp, cleanup, nil
 }
 
+// WriteChart extracts the named embedded chart into destDir (created if needed),
+// producing a real on-disk Helm chart the developer can own and `helm install`.
+func WriteChart(name, destDir string) error {
+	root := filepath.Join("charts", name)
+	if _, err := fs.Stat(chartsFS, root); err != nil {
+		return fmt.Errorf("unknown embedded chart %q", name)
+	}
+	return fs.WalkDir(chartsFS, root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(destDir, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o755)
+		}
+		data, err := chartsFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(dst, data, 0o644)
+	})
+}
+
 // writeValues marshals values to a temp YAML file and returns its path + cleanup.
 func writeValues(values map[string]any) (string, func(), error) {
 	if len(values) == 0 {

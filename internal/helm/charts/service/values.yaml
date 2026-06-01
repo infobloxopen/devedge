@@ -1,0 +1,11 @@
+# Values for a devedge-generated service chart. devedge fills `service.name` and
+# `dependencies` from the Service file; the developer supplies the image.
+service:
+  name: service
+  image: ""
+  port: 8080
+  replicas: 1
+
+# Each entry: { name, engine, version, envVar }. Rendered as an abstract
+# DependencyClaim + a DSN Secret per dependency (see templates/).
+dependencies: []

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: devedge-service
+description: A devedge-generated chart for a service and its declared dependencies.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

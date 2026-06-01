@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "service.name" . }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.service.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "service.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "service.name" . }}
+    spec:
+      containers:
+        - name: {{ include "service.name" . }}
+          image: {{ .Values.service.image | quote }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          env:
+            {{- range .Values.dependencies }}
+            # Indirect hotload DSN; the real DSN is mounted from the Secret below.
+            - name: {{ .envVar }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "service.name" $ }}-{{ .name }}-dsn
+                  key: dsn
+            {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "service.name" . }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "service.name" . }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}

@@ -1,0 +1,22 @@
+{{- /*
+  Abstract dependency claims, kept SEPARATE from the service Deployment so a
+  future app-owned workload chart can consume just this piece (plan decision 7).
+  A claim is environment-agnostic: in dev devedge binds it to the shared
+  instance's logical database; in a real cluster the org DB abstraction
+  provisions a dedicated instance. The connection is delivered via the
+  per-dependency DSN Secret (templates/dependency-secret.yaml).
+*/ -}}
+{{- range .Values.dependencies }}
+---
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: DependencyClaim
+metadata:
+  name: {{ include "service.name" $ }}-{{ .name }}
+  labels:
+    {{- include "service.labels" $ | nindent 4 }}
+spec:
+  engine: {{ .engine }}
+  version: {{ .version | default "" | quote }}
+  envVar: {{ .envVar }}
+  secretName: {{ include "service.name" $ }}-{{ .name }}-dsn
+{{- end }}

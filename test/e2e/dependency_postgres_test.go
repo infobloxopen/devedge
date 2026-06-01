@@ -114,6 +114,28 @@ func TestPostgresDependency_e2e(t *testing.T) {
 		t.Fatalf("expected to read back 42, got: %s", out)
 	}
 
+	// T026 — persistence across a (simulated) project down/up: the shared instance
+	// keeps running and EnsureDatabase is idempotent, so the row survives.
+	if err := prov.EnsureDatabase(ctx, b); err != nil {
+		t.Fatalf("re-EnsureDatabase: %v", err)
+	}
+	out, err = exec.CommandContext(ctx, "psql", connStr, "-tAc", "SELECT id FROM e2e").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "42") {
+		t.Fatalf("data should persist across down/up: out=%q err=%v", out, err)
+	}
+
+	// T026 — explicit clean wipe: drop then recreate the binding → table is gone.
+	if err := prov.DropDatabase(ctx, b); err != nil {
+		t.Fatalf("DropDatabase: %v", err)
+	}
+	if err := prov.EnsureDatabase(ctx, b); err != nil {
+		t.Fatalf("EnsureDatabase after clean: %v", err)
+	}
+	out, err = exec.CommandContext(ctx, "psql", connStr, "-tAc", "SELECT to_regclass('public.e2e') IS NULL").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "t") {
+		t.Fatalf("after --clean the table should be gone: out=%q err=%v", out, err)
+	}
+
 	// Sanity: the binding really isolates — a different service derives a distinct db.
 	b2, _ := depruntime.NewBinding("other", depruntime.Dep{Name: "db", Engine: depruntime.EnginePostgres, Port: 5432})
 	if b2.Database == b.Database {
