@@ -196,14 +196,16 @@ first-class, observable control-plane concern (Principle V) rather than one-shot
    instance pod (`psql` / `redis-cli` ship in those images — no new host dependency), idempotently
    (create-if-absent). The shared instance and its PVC are never dropped by a service's `down`.
 
-2. **Connectivity: stable hostname → EdgeIP → Traefik TCP entrypoint per engine (FR-003).** Each
-   engine gets a stable dev hostname (e.g. `postgres.dev.test`, `redis.dev.test`) resolving to the
-   EdgeIP `127.0.0.2` via the existing DNS/`/etc/hosts` path, and a dedicated Traefik **TCP
-   entrypoint** on the engine's standard port (`5432`/`6379`) with a catch-all `HostSNI("*")` router
-   forwarding to the in-cluster Service. The declared `port` is honored. This reuses
-   `internal/render` + the DNS seam and keeps "names over ports"; raw-TCP (non-SNI) routing is why a
-   dedicated entrypoint per engine is used rather than SNI multiplexing (detailed in research.md;
-   `localhost` port-forward considered and rejected there).
+2. **Connectivity: daemon-supervised ephemeral port-forward (FR-003) — revised during impl.** The
+   originally-planned stable-hostname → EdgeIP → Traefik-TCP-entrypoint path was abandoned: the edge
+   runs on the host but the dependency Service is an in-cluster ClusterIP the host can't route to
+   (see research decision 1). Instead the daemon supervises a `kubectl port-forward` per shared
+   instance on an **ephemeral `127.0.0.1` port**, and writes `127.0.0.1:<dynPort>` into the real DSN.
+   The indirect DSN (decision 3) hides the dynamic port from the app, so this needs no fixed port and
+   no host-routable cluster address. This is the **`forward-ephemeral`** connectivity mode; the
+   research taxonomy records the `forward-stable-host` / `forward-per-member` modes (leaning on
+   devedge's DNS + mkcert) for future advertised-endpoint engines (Kafka/Mongo), all behind the same
+   `Provisioner` seam.
 
 3. **Connection emission: hotload DSN env var + real-DSN file (FR-003/003a/003b).** devedge writes
    the **real DSN** (e.g. `postgres://<svc-user>:<pw>@postgres.dev.test:5432/<svc-db>`) atomically

@@ -4,25 +4,44 @@ Decisions that resolve the plan's unknowns. Each: **Decision / Rationale / Alter
 
 ## 1. How the locally-running service reaches an in-cluster dependency
 
-**Decision**: Front each shared engine instance with a **stable dev hostname** (`postgres.dev.test`,
-`redis.dev.test`) resolving to the EdgeIP `127.0.0.2` (existing DNS + `/etc/hosts` path), and a
-**dedicated Traefik TCP entrypoint** on the engine's standard port (`5432`/`6379`) with a catch-all
-`HostSNI("*")` TCP router forwarding to the in-cluster Service. The declared `port` is honored as
-the entrypoint port.
+**Decision (revised during implementation)**: A **daemon-supervised `kubectl port-forward`** per
+shared instance, bound to an **ephemeral `127.0.0.1` port**; devedge writes that
+`127.0.0.1:<dynPort>` into the real DSN file. Because the connection is delivered indirectly (the
+app reads the DSN from the file/env — decision 2), the dynamic port is invisible to the app, so no
+fixed port and no host-routable cluster address are needed. This is the `forward-ephemeral`
+connectivity mode (taxonomy below).
 
-**Rationale**: Reuses devedge's identity and existing seams — stable hostnames, EdgeIP, Traefik
-(including the TCP/SNI routing added in commit `7f2837c`), and the renderer in `internal/render`.
-Keeps "names over raw ports" (Principle I). One shared instance per engine means one entrypoint per
-engine — no port collisions, so the standard port can be used verbatim.
+**Why the originally-planned approach was abandoned**: the first plan routed a stable hostname →
+EdgeIP `127.0.0.2` → a **Traefik TCP entrypoint** → the in-cluster Service. Implementation showed
+this cannot work: the edge runs on the **host**, but the dependency Service is a **ClusterIP inside
+k3d's Docker network**, which the host cannot route to. devedge's HTTP routing only works because
+k3d publishes ingress ports 80/443 at *cluster-create* time; there is no published host port for raw
+TCP `5432`/`6379`, and k3d port maps are fixed at create time. Since the indirect DSN already hides
+the local endpoint, a port-forward is both sufficient and simple, and it makes the e2e runnable.
+
+### Connectivity-mode taxonomy (so future engines don't force a redesign)
+
+The connectivity mode is an engine-specific choice **behind `Provisioner.EnsureInstance`**; every
+mode still terminates in the same indirect DSN file and leaves the reconcile loop, daemon API, and
+CLI unchanged.
+
+| Class | Examples | Mode | Mechanism |
+|-------|----------|------|-----------|
+| Dumb TCP | postgres, redis (standalone), mysql | **forward-ephemeral** *(MVP)* | ephemeral `127.0.0.1:<dynPort>` forward → DSN file |
+| Single advertised endpoint | single-node Kafka (KRaft), Mongo standalone | **forward-stable-host** | stable `*.dev.test` name (devedge DNS + mkcert) + fixed-port forward, with the chart's `advertised.listeners` set to that same name:port so advertised == reachable |
+| Multi-member topology | Kafka multi-broker, Mongo replica set, Redis Cluster | **forward-per-member** | N `*.dev.test` names → N loopback IPs, one forward each, each member advertising its own name; **prefer single-node dev variants** to avoid this |
+
+**Key leverage**: devedge already runs authoritative DNS for `*.dev.test`, manages `/etc/hosts`, and
+issues an mkcert wildcard cert — so `forward-stable-host` (what Kafka/Mongo need) is mostly already
+built; the only addition is binding the forward to a known name:port and setting the chart's
+advertised listener to match. `Instance{Host,Port}` suffices for Classes 1–2; a multi-member
+topology would extend `Instance` with a bootstrap/advertised-address list (a small future struct
+change, not architectural). MVP ships only `forward-ephemeral`.
 
 **Alternatives rejected**:
-- *`kubectl port-forward` managed by the daemon* — an extra long-lived subprocess per engine to
-  supervise/restart; fragile and off-identity. Rejected.
-- *k3d host port mapping* — k3d port maps are fixed at cluster-create time; can't add a dependency
-  port to an existing dev cluster without recreating it. Rejected.
-- *SNI multiplexing on one entrypoint* — Postgres/Redis wire protocols are not TLS-SNI by default,
-  so a single SNI-routed entrypoint can't distinguish engines; a dedicated non-SNI entrypoint per
-  engine is simpler and correct.
+- *k3d host port mapping at cluster-create* — fixed at create time; can't add a dependency port to an
+  existing shared dev cluster without recreating it. (Still the right tool for Class-2 fixed ports.)
+- *Traefik TCP entrypoint on the EdgeIP* — host can't reach the in-cluster ClusterIP (see above).
 
 ## 2. Exact hotload DSN form (FR-003a)
 

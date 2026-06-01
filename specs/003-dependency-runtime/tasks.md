@@ -61,7 +61,7 @@ plan "Backward compatibility & external consumers"): the route registry/reconcil
 - [X] T011 [C] Implement `internal/depruntime/desired.go` + `reconcile.go`: derive desired state from a Service's dependencies; idempotent converge (ensure instance → provision isolation → write DSN → readiness probe), per-dependency errors, bounded timeout. (depends on T005, T009, T010)
 - [X] T012 [C] Implement `internal/daemon/depstore.go` (desired-dependency registry mirroring `registry.go`: event-driven, thread-safe) and wire a `internal/reconciler/dependency.go` that converges via `depruntime.Reconcile` **beside** the route reconciler without altering it. (depends on T011)
 - [X] T013 [S] Add the additive daemon endpoints in `internal/daemon/api.go` (`PUT/GET/DELETE /v1/services/{svc}/dependencies`; `GET` never returns raw creds/DSN) and the matching client methods in `internal/client/client.go`. (depends on T006, T012)
-- [ ] T014 [C] Add a TCP entrypoint + catch-all `HostSNI("*")` router per dependency engine (`postgres`/`redis` on `5432`/`6379` at the EdgeIP) in `internal/render/traefik.go`, plus the stable-hostname registration — **without** changing existing HTTP/TCP route rendering. (depends on T012)
+- [X] T014 [C] **Connectivity = ephemeral port-forward** (revised; supersedes the Traefik-entrypoint plan — host can't reach an in-cluster ClusterIP). Add `internal/cluster/portforward.go` (a daemon-supervised `kubectl port-forward` to an ephemeral `127.0.0.1` port, with liveness/restart), and have `HelmProvisioner.EnsureInstance` establish/reuse the forward and return `Instance{Host:"127.0.0.1", Port:<dynPort>}` so the DSN points at the forwarded port. Route rendering untouched. (depends on T010, T012)
 
 **Checkpoint**: deps can be declared to the daemon, an instance can be Helm-installed, isolation
 provisioned, a DSN emitted, and an engine fronted — all behind the route API, which is unchanged.
@@ -79,7 +79,7 @@ connect with the reported DSN, create+query a table; `de project down` releases 
 ### Tests (write first, must FAIL)
 
 - [X] T015 [P] [S] [US1] Integration test in `test/integration/dependency_runtime_test.go` (fake provisioner): `up` on a Service with one postgres dep drives it to Ready, writes the DSN file + reports the `fsnotify://` env var, and `up` is idempotent. Co-existence-safe (unique names, self-cleanup, isolated daemon).
-- [ ] T016 [P] [C] [US1] e2e test in `test/e2e/dependency_postgres_test.go` (k3d): Helm-install the shared Postgres, provision a service DB, connect over the reported DSN, write+read a row. **Skipped-with-reason** when Docker/k3d/helm absent (never claimed passed).
+- [X] T016 [P] [C] [US1] e2e test in `test/e2e/dependency_postgres_test.go` (k3d): Helm-install the shared Postgres, provision a service DB, connect over the reported DSN, write+read a row. **Skipped-with-reason** when Docker/k3d/helm absent (never claimed passed).
 - [X] T017 [P] [S] [US1] Unit test in `pkg/config/service.go` test for the new `Dependency` helpers (default port per engine, env-var name, DSN file path).
 
 ### Implementation
@@ -107,8 +107,8 @@ in each; confirm each sees only its own and both are reachable.
 
 ### Implementation
 
-- [ ] T023 [C] [US2] Implement per-service isolation in the `Provisioner` (Postgres: `CREATE ROLE … LOGIN` + `CREATE DATABASE … OWNER`, idempotent; the binding names derived deterministically) so two services never collide. (depends on T010, T011)
-- [ ] T024 [S] [US2] Ensure the dependency reconciler scopes all reads/writes to the requesting service and the `devedge-deps` namespace only (DK invariant: never touch other namespaces/charts). (depends on T012)
+- [X] T023 [C] [US2] Implement per-service isolation in the `Provisioner` (Postgres: `CREATE ROLE … LOGIN` + `CREATE DATABASE … OWNER`, idempotent; the binding names derived deterministically) so two services never collide. (depends on T010, T011)
+- [X] T024 [S] [US2] Ensure the dependency reconciler scopes all reads/writes to the requesting service and the `devedge-deps` namespace only (DK invariant: never touch other namespaces/charts). (depends on T012)
 
 **Checkpoint**: co-existence-safe isolation proven; SC-002 holds.
 
@@ -127,8 +127,8 @@ in each; confirm each sees only its own and both are reachable.
 
 ### Implementation
 
-- [ ] T027 [S] [US3] Add `--clean` to `projectDownCmd` (default false) and plumb `clean=true` to `DELETE /v1/services/{svc}/dependencies`; default keeps data (FR-005/FR-007). (depends on T020, T013)
-- [ ] T028 [S] [US3] Implement `Provisioner.DropDatabase` (Postgres `DROP DATABASE`/`DROP ROLE`; Redis `ACL DELUSER` + namespace flush) targeting only the service's binding. (depends on T010, T023)
+- [X] T027 [S] [US3] Add `--clean` to `projectDownCmd` (default false) and plumb `clean=true` to `DELETE /v1/services/{svc}/dependencies`; default keeps data (FR-005/FR-007). (depends on T020, T013)
+- [X] T028 [S] [US3] Implement `Provisioner.DropDatabase` (Postgres `DROP DATABASE`/`DROP ROLE`; Redis `ACL DELUSER` + namespace flush) targeting only the service's binding. (depends on T010, T023)
 
 **Checkpoint**: persistence by default; explicit, service-scoped wipe; SC-003 holds.
 

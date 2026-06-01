@@ -4,19 +4,24 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/helm"
 )
 
-// HelmProvisioner is the real Provisioner: it installs shared instances with Helm
-// and provisions per-service isolation by exec'ing psql / redis-cli inside the
+// HelmProvisioner is the real Provisioner: it installs shared instances with Helm,
+// reaches them from the host via a supervised ephemeral port-forward, and
+// provisions per-service isolation by exec'ing psql / redis-cli inside the
 // instance pod. Its live behavior is exercised by the k3d e2e tests; the unit
 // suite uses the in-memory fake instead.
 type HelmProvisioner struct {
 	helm        *helm.Helm
 	kubeContext string
 	namespace   string
+
+	mu       sync.Mutex
+	forwards map[Engine]*cluster.PortForward
 }
 
 // NewHelmProvisioner targets the given kube context (empty = current context),
@@ -26,7 +31,33 @@ func NewHelmProvisioner(kubeContext string) *HelmProvisioner {
 		helm:        helm.New(kubeContext),
 		kubeContext: kubeContext,
 		namespace:   helm.DefaultNamespace,
+		forwards:    map[Engine]*cluster.PortForward{},
 	}
+}
+
+// Close stops all supervised port-forwards. Called on daemon shutdown.
+func (p *HelmProvisioner) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, pf := range p.forwards {
+		pf.Stop()
+	}
+}
+
+// ensureForward returns the local port of a live forward to the engine's pod,
+// (re)starting it if absent or dead. forward-ephemeral connectivity mode.
+func (p *HelmProvisioner) ensureForward(engine Engine, target string, remotePort int) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if pf := p.forwards[engine]; pf != nil && pf.Alive() {
+		return pf.LocalPort, nil
+	}
+	pf, err := cluster.StartPortForward(p.kubeContext, p.namespace, target, remotePort)
+	if err != nil {
+		return 0, err
+	}
+	p.forwards[engine] = pf
+	return pf.LocalPort, nil
 }
 
 func chartFor(e Engine) (chart, release, target string, port int, err error) {
@@ -40,12 +71,8 @@ func chartFor(e Engine) (chart, release, target string, port int, err error) {
 	}
 }
 
-// stableHost is the dev hostname a service uses to reach the engine (resolved to
-// the EdgeIP and forwarded by the per-engine Traefik TCP entrypoint).
-func stableHost(e Engine) string { return string(e) + ".dev.test" }
-
 func (p *HelmProvisioner) EnsureInstance(ctx context.Context, engine Engine, version string) (Instance, error) {
-	chart, release, _, port, err := chartFor(engine)
+	chart, release, target, port, err := chartFor(engine)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -56,7 +83,13 @@ func (p *HelmProvisioner) EnsureInstance(ctx context.Context, engine Engine, ver
 	if err := p.helm.Install(ctx, chart, release, p.namespace, values); err != nil {
 		return Instance{}, err
 	}
-	return Instance{Engine: engine, Host: stableHost(engine), Port: port}, nil
+	// Reach the in-cluster instance from the host via an ephemeral port-forward;
+	// the indirect DSN hides the dynamic port from the app (research decision 1).
+	localPort, err := p.ensureForward(engine, target, port)
+	if err != nil {
+		return Instance{}, fmt.Errorf("port-forward %s: %w", engine, err)
+	}
+	return Instance{Engine: engine, Host: "127.0.0.1", Port: localPort}, nil
 }
 
 func (p *HelmProvisioner) Ready(ctx context.Context, engine Engine) error {

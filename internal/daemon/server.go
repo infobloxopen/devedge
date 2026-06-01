@@ -301,6 +301,10 @@ func (s *Server) Run(ctx context.Context) error {
 		if tcpSrv != nil {
 			tcpSrv.Shutdown(context.Background())
 		}
+		// Stop any supervised dependency port-forwards.
+		if c, ok := s.prov.(interface{ Close() }); ok {
+			c.Close()
+		}
 	}()
 
 	s.logger.Info("devedged listening",
