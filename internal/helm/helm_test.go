@@ -30,10 +30,16 @@ func TestServiceChart_render(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render service chart: %v", err)
 	}
-	for _, want := range []string{"kind: Deployment", "kind: DependencyClaim", "kind: Secret", "DATABASE_URL", "engine: postgres"} {
+	// The per-dependency connection Secret is created by devedge (the daemon) at
+	// deploy time with the real in-cluster DSN — not by the chart — so the chart
+	// references it (secretKeyRef) but does not render a "kind: Secret" (005).
+	for _, want := range []string{"kind: Deployment", "kind: DependencyClaim", "DATABASE_URL", "engine: postgres", "webhooks-db-dsn"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("service chart render missing %q\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "kind: Secret") {
+		t.Errorf("service chart must NOT render the connection Secret (daemon owns it):\n%s", out)
 	}
 }
 

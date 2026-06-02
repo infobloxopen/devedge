@@ -78,6 +78,25 @@ See `.claude/skills/README.md` for the template and conventions.
 - Go 1.23 (existing devedge module) + `internal/cluster` (004 — resolved `ClusterTarget` + `EnsureCluster`), (005-app-workload-deploy)
 - workload state is k8s (a Helm release per service); per-service dependency data persists in (005-app-workload-deploy)
 
+## Workload deploy (005-app-workload-deploy)
+
+`de project up --deploy` is an opt-in that deploys the service workload into the resolved cluster
+after ensuring the cluster (004) and provisioning dependencies (003). Local-run stays the default
+when `--deploy` is absent.
+
+- **Image source**: either a pre-built image reference (`spec.workload.image`) or a project build
+  (`spec.workload.build` — runs `docker build` then `k3d image import`; no external registry needed).
+- **In-cluster dependency connection**: the daemon creates a Secret named `<service>-<dep>-dsn`
+  in the resolved cluster at deploy time; the `service` chart mounts it as the dep's env var so
+  the workload connects over in-cluster Service DNS.
+- **Routing**: the `service` chart includes an Ingress annotated `devedge.io/expose=true` for
+  `spec.dev.hostname`; devedge's ingress-watch path picks it up.
+- **`de project down`** removes the deployed workload (`helm uninstall`, footprint-only); it is a
+  no-op for services that were never deployed.
+- Implementation: `internal/deploy/` (Deployer, DockerK3dBuilder), `cmd/de/deploy.go`
+  (deployWorkload, removeWorkload), `pkg/config/service.go` (WorkloadSpec, BuildSpec), and the
+  `service` Helm chart (Deployment + Service + Ingress).
+
 ## Cluster topology model (004-cluster-topology)
 
 `de project up` resolves every project to an explicit cluster target — never the ambient kube context:

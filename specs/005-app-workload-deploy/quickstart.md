@@ -39,7 +39,7 @@ spec:
 de project up --deploy
 # cluster: devedge (shared dev)
 # dependency db (postgres) ready
-# deployed: my-svc -> cluster devedge (1 replica), https://my-svc.dev.test
+# deployed: my-svc -> cluster devedge (1 replica(s)) https://my-svc.dev.test
 ```
 
 What happened:

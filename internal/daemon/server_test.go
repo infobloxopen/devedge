@@ -115,7 +115,8 @@ func (p *recordingProv) EnsureInstance(_ context.Context, ref depruntime.Instanc
 	return depruntime.Instance{Engine: ref.Engine, Host: string(ref.Engine) + ".dev.test", Port: 5432}, nil
 }
 func (p *recordingProv) Ready(context.Context, depruntime.InstanceRef) error       { return nil }
-func (p *recordingProv) EnsureDatabase(context.Context, depruntime.Binding) error { return nil }
+func (p *recordingProv) EnsureDatabase(context.Context, depruntime.Binding) error   { return nil }
+func (p *recordingProv) EnsureConnSecret(context.Context, depruntime.Binding) error { return nil }
 func (p *recordingProv) DropDatabase(context.Context, depruntime.Binding) error {
 	p.dropped[p.ctx] = true
 	return nil

@@ -99,6 +99,11 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 	if err := r.prov.EnsureDatabase(ctx, binding); err != nil {
 		return fail(fmt.Errorf("dependency %q: provision isolation: %w", d.Name, err))
 	}
+	// Materialize the in-cluster connection Secret so a deployed workload (005) can
+	// reach this binding over the in-cluster Service DNS. Unused by local-run.
+	if err := r.prov.EnsureConnSecret(ctx, binding); err != nil {
+		return fail(fmt.Errorf("dependency %q: emit in-cluster connection: %w", d.Name, err))
+	}
 	res.State = StateProvisioned
 
 	port := inst.Port

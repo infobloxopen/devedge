@@ -38,9 +38,9 @@ in-cluster networking, ingress routing), so e2e coverage is central.
 - [X] T004 [S] Add the `spec.workload` block (`Image` | `Build{Context,Dockerfile}`, `Port`, `Replicas`) to `ServiceConfig` with strict decode + validation in `pkg/config/service.go`; expose a `Workload()` accessor (and a `WorkloadDeclarer` interface in `pkg/config/resource.go`).
 - [X] T005 [C] Implement `internal/deploy` `Deployer` + `ImageBuilder` adapter interface in `internal/deploy/deploy.go`: resolve image source → ensure image present in cluster (via builder) → render + `helm upgrade --install --wait` the `service` chart with image/port/replicas/hostname/dep-env → wait Ready; actionable errors, no half-deploy (FR-002/005/007) — depends on T003.
 - [X] T006 [C] Implement the docker/k3d `ImageBuilder` in `internal/deploy/image.go`: reference → no-op; build → `docker build -t <tag> <context>` then `k3d image import <tag> -c <cluster>` (no registry) — depends on T005.
-- [ ] T007 [S] Implement in-cluster DSN derivation (003 `(db,user,password)` binding + in-cluster Service host `devedge-<engine>.<ns>.svc.cluster.local:<port>` → real DSN) in `internal/deploy/dsn.go` — depends on T003.
+- [X] T007 [S] Implement in-cluster DSN derivation (003 `(db,user,password)` binding + in-cluster Service host `devedge-<engine>.<ns>.svc.cluster.local:<port>` → real DSN) in `internal/deploy/dsn.go` — depends on T003.
 - [X] T008 [S] Add an `ingress.yaml` to the `service` chart (host `service.hostname`, annotated `devedge.io/expose=true`, backend → the Service) and thread `service.hostname`; confirm `deployment.yaml` dep-env references the `<svc>-<dep>-dsn` Secret, in `internal/helm/charts/service/templates/`.
-- [ ] T009 [C] Extend deploy-time dependency provisioning to emit the in-cluster `<service>-<dep>-dsn` Secret (key `dsn`) into the resolved cluster from the daemon's binding creds (request carries a "deploy" flag; local-run unchanged), in `internal/daemon/` + `internal/client/` — depends on T007.
+- [X] T009 [C] Extend deploy-time dependency provisioning to emit the in-cluster `<service>-<dep>-dsn` Secret (key `dsn`) into the resolved cluster from the daemon's binding creds (request carries a "deploy" flag; local-run unchanged), in `internal/daemon/` + `internal/client/` — depends on T007.
 
 **Checkpoint**: config + deploy core + image adapter + in-cluster dep secret + chart Ingress exist and are unit-green.
 
@@ -66,8 +66,8 @@ in-cluster networking, ingress routing), so e2e coverage is central.
 
 **Independent Test**: deploy a service with a Postgres dependency; from the workload connect to the DB over the injected in-cluster DSN and round-trip a row; resolve the dev hostname → workload responds.
 
-- [ ] T013 [C] [US2] e2e in `test/e2e/workload_deploy_test.go`: the deployed workload connects to its Postgres dependency over the in-cluster `<svc>-<dep>-dsn` Secret (write+read a row), and the service's dev hostname routes to the workload via the ingress path (FR-003/004) — must fail first.
-- [ ] T014 [C] [US2] e2e: a `workload.build` service is built (`docker build`) + `k3d image import`ed + deployed + reaches Ready on the resolved cluster (FR-011 build path) — must fail first.
+- [X] T013 [C] [US2] e2e in `test/e2e/workload_deploy_test.go`: the deployed workload connects to its Postgres dependency over the in-cluster `<svc>-<dep>-dsn` Secret (write+read a row), and the service's dev hostname routes to the workload via the ingress path (FR-003/004) — must fail first.
+- [X] T014 [C] [US2] e2e: a `workload.build` service is built (`docker build`) + `k3d image import`ed + deployed + reaches Ready on the resolved cluster (FR-011 build path) — must fail first.
 
 **Checkpoint**: deployed service is data-connected and addressable; both image sources proven.
 
@@ -79,17 +79,17 @@ in-cluster networking, ingress routing), so e2e coverage is central.
 
 **Independent Test**: deploy two services with identical internal names to the shared cluster; both Ready + addressable; `down` one leaves the other Ready.
 
-- [ ] T015 [C] [US3] e2e in `test/e2e/workload_deploy_test.go`: two services deployed to the shared cluster each get an isolated release + ingress host; both Ready; `down` one leaves the other Ready + addressable (FR-008/006) — must fail first.
-- [ ] T016 [S] [US3] Per-service release/ingress naming via `cluster.ProjectSlug` (collision-free for distinct services) in `internal/deploy` + the chart values; assert no regression to 003/004 isolation.
+- [X] T015 [C] [US3] e2e in `test/e2e/workload_deploy_test.go`: two services deployed to the shared cluster each get an isolated release + ingress host; both Ready; `down` one leaves the other Ready + addressable (FR-008/006) — must fail first.
+- [X] T016 [S] [US3] Per-service release/ingress naming via `cluster.ProjectSlug` (collision-free for distinct services) in `internal/deploy` + the chart values; assert no regression to 003/004 isolation.
 
 ---
 
 ## Phase 6: Teardown & Polish
 
 - [X] T017 [C] Remove the service's workload release on `de project down` (`helm uninstall`, footprint-only — never the shared cluster or another project) in `cmd/de/main.go` (FR-006) — depends on T011.
-- [ ] T018 [P] [S] Structured logging on resolve-image / build / deploy / teardown across `internal/deploy` (Principle V — report placement + workload status).
-- [ ] T019 [P] [S] Docs: update devedge `README.md` / `CLAUDE.md` / `CHANGELOG.md` for `de project up --deploy` + the `spec.workload` block, and validate every step in `specs/005-app-workload-deploy/quickstart.md`.
-- [ ] T020 [S] Final scope diff vs FR-001…FR-011 / SC-001…SC-005 in `specs/005-app-workload-deploy/SCOPE.md`; confirm no gold-plating and that local-run default behavior is unchanged when `--deploy` is absent.
+- [X] T018 [P] [S] Structured logging on resolve-image / build / deploy / teardown across `internal/deploy` (Principle V — report placement + workload status).
+- [X] T019 [P] [S] Docs: update devedge `README.md` / `CLAUDE.md` / `CHANGELOG.md` for `de project up --deploy` + the `spec.workload` block, and validate every step in `specs/005-app-workload-deploy/quickstart.md`.
+- [X] T020 [S] Final scope diff vs FR-001…FR-011 / SC-001…SC-005 in `specs/005-app-workload-deploy/SCOPE.md`; confirm no gold-plating and that local-run default behavior is unchanged when `--deploy` is absent.
 
 ---
 

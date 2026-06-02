@@ -4,8 +4,14 @@
   A claim is environment-agnostic: in dev devedge binds it to the shared
   instance's logical database; in a real cluster the org DB abstraction
   provisions a dedicated instance. The connection is delivered via the
-  per-dependency DSN Secret (templates/dependency-secret.yaml).
+  per-dependency DSN Secret which devedge populates with the in-cluster connection.
+
+  Rendered by default (the abstract artifact `de project chart` emits). The dev
+  deploy path (005) sets `service.noDependencyClaims=true` to skip it: there is no
+  DependencyClaim CRD/controller in a local dev cluster, and devedge already writes
+  the in-cluster DSN Secret directly, so the claim is unnecessary there.
 */ -}}
+{{- if not .Values.service.noDependencyClaims }}
 {{- range .Values.dependencies }}
 ---
 apiVersion: devedge.infoblox.dev/v1alpha1
@@ -19,4 +25,5 @@ spec:
   version: {{ .version | default "" | quote }}
   envVar: {{ .envVar }}
   secretName: {{ include "service.name" $ }}-{{ .name }}-dsn
+{{- end }}
 {{- end }}

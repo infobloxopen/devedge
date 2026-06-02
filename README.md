@@ -316,7 +316,7 @@ de renew HOST
 de ls [--json]
 de inspect HOST
 
-de project up [-f devedge.yaml] [--watch] [--env dev|ci|ephemeral]
+de project up [-f devedge.yaml] [--watch] [--env dev|ci|ephemeral] [--deploy]
 de project down [PROJECT] [-f devedge.yaml] [--clean]
 de project chart [-f devedge.yaml] [-o DIR]
 
@@ -375,6 +375,13 @@ spec:
     hostname: webhooks.dev.test    # required; valid hostname
   cluster:                         # optional; cluster placement (feature 004)
     dedicated: false               # true → own cluster (devedge-proj-<slug>)
+  workload:                        # optional; enables `de project up --deploy` (feature 005)
+    image: ghcr.io/acme/webhooks:dev  # EITHER a pre-built image reference
+    # build:                        # OR build from the project (exactly one of image/build)
+    #   context: .
+    #   dockerfile: Dockerfile      # optional, defaults to Dockerfile
+    port: 8080                     # required when workload is set
+    replicas: 1                    # optional, default 1
   dependencies:                    # optional; started on `de project up`
     - name: db
       engine: postgres             # postgres | redis
@@ -420,6 +427,75 @@ shared instance. `de project chart` emits (does not deploy) a Helm chart express
 abstract claims, so the same declaration maps to a shared logical database in dev and a dedicated
 instance in a real cluster. See
 [`specs/003-dependency-runtime/`](specs/003-dependency-runtime/) for the design and contract.
+
+#### Deploying the workload (opt-in)
+
+By default `de project up` runs the service locally. To run the service *inside* the resolved
+cluster — next to its dependencies — add a `spec.workload` block to your `kind: Service` config
+and pass `--deploy`:
+
+```bash
+de project up --deploy
+# cluster: devedge (shared dev)
+# dependency db (postgres) ready
+# deployed: my-svc -> cluster devedge (1 replica(s)) https://my-svc.dev.test
+```
+
+Declare a pre-built image:
+
+```yaml
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: my-svc
+spec:
+  dev:
+    hostname: my-svc.dev.test
+  workload:
+    image: ghcr.io/acme/my-svc:dev   # pre-built reference
+    port: 8080
+    replicas: 1                       # optional, default 1
+  dependencies:
+    - name: db
+      engine: postgres
+      port: 5432
+```
+
+Or build from the project (no external registry needed — the image is loaded straight into the
+cluster via `docker build` + `k3d image import`):
+
+```yaml
+  workload:
+    build:
+      context: .
+      dockerfile: Dockerfile   # optional, defaults to Dockerfile
+    port: 8080
+```
+
+Exactly one of `image` or `build` must be set; `port` is required.
+
+**In-cluster dependency connection.** A deployed workload reaches its dependencies over the
+in-cluster Service DNS (e.g.
+`devedge-postgres.devedge-deps.svc.cluster.local:5432`) using per-service credentials delivered
+via an in-cluster Secret (`<service>-<dep>-dsn`) that devedge creates at deploy time. The same
+003 binding identity (database, user, password) is reused; only the reachable host differs.
+
+**Routing.** The `service` chart includes an Ingress annotated `devedge.io/expose=true` for
+`spec.dev.hostname`, so the deployed workload is reachable over its stable dev hostname via
+devedge's existing ingress-watch path.
+
+**Idempotent.** Re-running `de project up --deploy` after a change rolls out the running workload
+with no duplicate release.
+
+**Teardown.** `de project down` removes the deployed workload (`helm uninstall`, footprint-only —
+never the shared cluster or another project's workload). It is a no-op for services that were
+never deployed. `--clean` dependency-data semantics (003) and dedicated-cluster removal (004) are
+unchanged.
+
+**Coexistence.** Multiple services deployed to the shared dev cluster each get a distinct release
+(named by service slug) and a distinct Ingress host; taking one down leaves the others running.
+
+See [`specs/005-app-workload-deploy/`](specs/005-app-workload-deploy/) for the full design.
 
 ## Development
 

@@ -7,6 +7,7 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/helm"
@@ -65,6 +66,7 @@ type Deployer struct {
 	Builder     ImageBuilder
 	Namespace   string
 	ClusterName string
+	Logger      *slog.Logger // observability (resolve/deploy/teardown); defaults to slog.Default()
 }
 
 // NewDeployer targets the resolved cluster's context + dependency namespace.
@@ -77,6 +79,13 @@ func NewDeployer(kubeContext, namespace, clusterName string) *Deployer {
 	}
 }
 
+func (d *Deployer) log() *slog.Logger {
+	if d.Logger != nil {
+		return d.Logger
+	}
+	return slog.Default()
+}
+
 // Deploy resolves the image, then renders + installs the service chart and waits
 // for the workload to be Ready (`helm upgrade --install --wait`). Idempotent — a
 // re-deploy converges the release with no duplicate workload (FR-005).
@@ -85,19 +94,23 @@ func (d *Deployer) Deploy(ctx context.Context, w Workload, src ImageSource) (Sta
 	if src.Build != nil && src.Build.Tag == "" {
 		src.Build.Tag = buildTag(release)
 	}
+	d.log().Info("resolving workload image", "service", w.Service, "cluster", d.ClusterName, "build", src.Build != nil)
 	image, err := d.Builder.EnsureImage(ctx, src, d.ClusterName)
 	if err != nil {
 		return Status{}, fmt.Errorf("resolve image: %w", err)
 	}
+	d.log().Info("deploying workload", "service", w.Service, "release", release, "image", image, "cluster", d.ClusterName)
 	values := chartValues(release, image, w.Port, w.Replicas, w.Hostname, w.Deps)
 	if err := d.Helm.Install(ctx, helm.ChartService, release, d.Namespace, values); err != nil {
 		return Status{}, fmt.Errorf("deploy workload %q: %w", w.Service, err)
 	}
+	d.log().Info("workload deployed", "service", w.Service, "release", release, "hostname", w.Hostname)
 	return Status{Release: release, Image: image, Replicas: effectiveReplicas(w.Replicas), Hostname: w.Hostname}, nil
 }
 
 // Remove uninstalls the service's workload release (footprint-only — FR-006).
 func (d *Deployer) Remove(ctx context.Context, service string) error {
+	d.log().Info("removing workload", "service", service, "release", cluster.ProjectSlug(service), "cluster", d.ClusterName)
 	return d.Helm.Uninstall(ctx, cluster.ProjectSlug(service), d.Namespace)
 }
 
@@ -119,6 +132,9 @@ func chartValues(name, image string, port, replicas int, hostname string, deps [
 			"port":     port,
 			"replicas": effectiveReplicas(replicas),
 			"hostname": hostname,
+			// Skip the prod-abstraction DependencyClaim CR in dev: there is no CRD
+			// in a local cluster, and the in-cluster DSN Secret is written directly.
+			"noDependencyClaims": true,
 		},
 		"dependencies": dv,
 	}

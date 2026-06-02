@@ -8,6 +8,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+#### Workload deploy (005-app-workload-deploy)
+
+- **`de project up --deploy`**: new opt-in flag that deploys the service workload into the
+  resolved cluster after ensuring the cluster (004) and provisioning dependencies (003).
+  Without `--deploy` the command behaves exactly as before (local-run + deps); no default
+  behavior is changed. Reports the deploy as
+  `deployed: <service> -> cluster <name> (<n> replica(s)) https://<hostname>`.
+
+- **`spec.workload` in `kind: Service`**: new optional block that declares the service's
+  deployable workload. Exactly one of `image` (pre-built reference) or `build` (project build)
+  must be set; `port` is required; `replicas` defaults to 1.
+  - **`spec.workload.image`**: deploy a pre-built container image reference as-is.
+  - **`spec.workload.build`**: build the image from the project (`docker build` +
+    `k3d image import` into the resolved cluster) — no external registry required.
+
+- **In-cluster dependency connection**: at deploy time devedge creates a Secret named
+  `<service>-<dep>-dsn` in the resolved cluster for each declared dependency, pointing at
+  the dependency's in-cluster Service DNS with per-service credentials (reusing the 003
+  binding). The `service` chart mounts the Secret so the workload connects to its
+  dependencies without any manual credential management.
+
+- **Dev-hostname Ingress**: the `service` chart now includes an Ingress annotated
+  `devedge.io/expose=true` for `spec.dev.hostname`, so the deployed workload is reachable
+  over its stable dev hostname via devedge's existing ingress-watch path.
+
+- **`de project down` removes the workload**: in addition to releasing routes and
+  dependency bindings, `down` uninstalls the service's workload Helm release (footprint-only
+  — never the shared cluster or another project's workload). No-op for services that were
+  never deployed.
+
 #### Cluster topology model (004-cluster-topology)
 
 - **Shared dev cluster auto-ensure**: `de project up` now resolves every

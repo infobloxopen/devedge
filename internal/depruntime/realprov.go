@@ -2,11 +2,14 @@ package depruntime
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 
 	"github.com/infobloxopen/devedge/internal/cluster"
+	"github.com/infobloxopen/devedge/internal/dsn"
 	"github.com/infobloxopen/devedge/internal/helm"
 )
 
@@ -172,6 +175,56 @@ func (p *HelmProvisioner) ensureRedis(ctx context.Context, b Binding) error {
 	_, err := cluster.KubectlExec(ctx, p.kubeContext, p.namespace, target, "",
 		"redis-cli", "ACL", "SETUSER", b.User, "on", ">"+b.Password, "~"+b.KeyNamespace+"*", "+@all")
 	return err
+}
+
+// EnsureConnSecret writes the binding's in-cluster connection (reachable over the
+// engine's in-cluster Service DNS, using 003's per-service creds) into a Secret
+// the deployed workload's chart references (005). Idempotent (kubectl apply).
+func (p *HelmProvisioner) EnsureConnSecret(ctx context.Context, b Binding) error {
+	conn, err := inClusterDSN(b, p.namespace)
+	if err != nil {
+		return err
+	}
+	name := cluster.ProjectSlug(b.Service) + "-" + b.Dependency + "-dsn"
+	manifest := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: %s
+  namespace: %s
+type: Opaque
+data:
+  dsn: %s
+`, name, p.namespace, base64.StdEncoding.EncodeToString([]byte(conn)))
+	return kubectlApplyStdin(ctx, p.kubeContext, manifest)
+}
+
+// inClusterDSN derives the real DSN a pod uses to reach the binding's shared
+// instance over the in-cluster Service DNS (e.g. devedge-postgres.devedge-deps.
+// svc.cluster.local:5432), using 003's per-service (db,user,password) binding.
+func inClusterDSN(b Binding, namespace string) (string, error) {
+	_, release, _, port, err := instanceFor(b.instanceRef())
+	if err != nil {
+		return "", err
+	}
+	host := release + "." + namespace + ".svc.cluster.local"
+	return dsn.RealDSN(dsn.Conn{
+		Engine: string(b.Engine), Host: host, Port: port,
+		Database: b.Database, User: b.User, Password: b.Password,
+	})
+}
+
+// kubectlApplyStdin applies a manifest to the given context via stdin.
+func kubectlApplyStdin(ctx context.Context, kubeContext, manifest string) error {
+	args := []string{"apply", "-f", "-"}
+	if kubeContext != "" {
+		args = append([]string{"--context", kubeContext}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdin = strings.NewReader(manifest)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("kubectl apply connection secret: %w: %s", err, out)
+	}
+	return nil
 }
 
 func (p *HelmProvisioner) DropDatabase(ctx context.Context, b Binding) error {

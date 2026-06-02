@@ -84,6 +84,10 @@ type Provisioner interface {
 	Ready(ctx context.Context, ref InstanceRef) error
 	// EnsureDatabase idempotently provisions the binding's isolated db/role/ACL.
 	EnsureDatabase(ctx context.Context, b Binding) error
+	// EnsureConnSecret materializes the binding's in-cluster connection as a
+	// Secret in the cluster (reachable over the in-cluster Service DNS), so a
+	// deployed workload (005) can connect. Idempotent; unused by local-run.
+	EnsureConnSecret(ctx context.Context, b Binding) error
 	// DropDatabase removes only this binding's isolation slice (never the instance).
 	DropDatabase(ctx context.Context, b Binding) error
 }

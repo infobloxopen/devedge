@@ -39,6 +39,7 @@ func (f *recordingFake) EnsureDatabase(_ context.Context, b depruntime.Binding) 
 	f.ensured = append(f.ensured, b)
 	return nil
 }
+func (f *recordingFake) EnsureConnSecret(context.Context, depruntime.Binding) error { return nil }
 func (f *recordingFake) DropDatabase(_ context.Context, b depruntime.Binding) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
