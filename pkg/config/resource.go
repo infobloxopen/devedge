@@ -45,6 +45,13 @@ type DependencyDeclarer interface {
 	Dependencies() []Dependency
 }
 
+// ClusterPreferrer is implemented by kinds that can opt into a dedicated cluster
+// (spec.cluster.dedicated). Service implements it; Config does not (a non-Service
+// resource resolves to the shared cluster). The CLI type-asserts to read it.
+type ClusterPreferrer interface {
+	ClusterDedicated() bool
+}
+
 // typeMeta is the apiVersion/kind envelope, decoded first to choose a kind
 // decoder without committing to a concrete type.
 type typeMeta struct {

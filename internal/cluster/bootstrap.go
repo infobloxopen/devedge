@@ -8,9 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/infobloxopen/devedge/internal/certs"
 )
+
+// certManagerVersion pins the cert-manager release bootstrap installs. The
+// ClusterIssuer below is a hard dependency on cert-manager's CRDs + webhook.
+const certManagerVersion = "v1.14.5"
 
 // BootstrapOptions configures what gets installed into a cluster.
 type BootstrapOptions struct {
@@ -41,11 +46,20 @@ func (o *BootstrapOptions) devedgePort() string {
 func Bootstrap(opts BootstrapOptions) error {
 	ctx := opts.Provider.KubeContext(opts.ClusterName)
 
-	// Safety check: refuse to bootstrap non-local clusters.
+	// Safety check: refuse to bootstrap non-local clusters. This gate is why it is
+	// safe to install cluster-scoped components (cert-manager) below: we only ever
+	// do so on a local dev cluster, never a real/remote one.
 	if !opts.Force {
 		if err := ValidateLocalCluster(ctx); err != nil {
 			return err
 		}
+	}
+
+	// cert-manager is a hard prerequisite for the ClusterIssuer step. Install it
+	// into the local cluster and wait until its webhook serves so the issuer
+	// applies cleanly. Idempotent. (`ctx` here is the kube-context string.)
+	if err := installCertManager(context.Background(), ctx); err != nil {
+		return fmt.Errorf("install cert-manager: %w", err)
 	}
 
 	ns := opts.namespace()
@@ -115,13 +129,58 @@ spec:
 
 	for _, step := range steps {
 		fmt.Printf("  %s... ", step.name)
-		if err := kubectlApply(ctx, step.manifest); err != nil {
+		// Retry: just after cert-manager's webhook deployment reports Available
+		// there is a brief window before it serves admission, so the first
+		// ClusterIssuer apply can fail transiently.
+		if err := kubectlApplyRetry(ctx, step.manifest, 6); err != nil {
 			fmt.Println("FAILED")
 			return fmt.Errorf("%s: %w", step.name, err)
 		}
 		fmt.Println("OK")
 	}
 	return nil
+}
+
+// installCertManager installs cert-manager (CRDs + controller + webhook) and waits
+// for it to be ready, so the devedge ClusterIssuer applies cleanly. Idempotent: a
+// re-apply on an already-installed cluster is a no-op and the rollout waits return
+// immediately. Only ever runs on local clusters (Bootstrap gates on
+// ValidateLocalCluster first).
+func installCertManager(ctx context.Context, kubeContext string) error {
+	url := fmt.Sprintf("https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml", certManagerVersion)
+	fmt.Printf("  install cert-manager %s... ", certManagerVersion)
+	apply := exec.CommandContext(ctx, "kubectl", "--context", kubeContext, "apply", "-f", url)
+	apply.Stdout = os.Stderr
+	apply.Stderr = os.Stderr
+	if err := apply.Run(); err != nil {
+		fmt.Println("FAILED")
+		return fmt.Errorf("apply cert-manager manifest: %w", err)
+	}
+	for _, dep := range []string{"cert-manager", "cert-manager-cainjector", "cert-manager-webhook"} {
+		wait := exec.CommandContext(ctx, "kubectl", "--context", kubeContext, "-n", "cert-manager",
+			"rollout", "status", "deployment/"+dep, "--timeout=120s")
+		wait.Stdout = os.Stderr
+		wait.Stderr = os.Stderr
+		if err := wait.Run(); err != nil {
+			fmt.Println("FAILED")
+			return fmt.Errorf("cert-manager %s not ready: %w", dep, err)
+		}
+	}
+	fmt.Println("OK")
+	return nil
+}
+
+// kubectlApplyRetry applies a manifest, retrying transient failures with linear
+// backoff (e.g. the cert-manager webhook warming up).
+func kubectlApplyRetry(kubeContext, manifest string, attempts int) error {
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = kubectlApply(kubeContext, manifest); err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(i+1) * 2 * time.Second)
+	}
+	return err
 }
 
 // CreateAndBootstrap creates a cluster and bootstraps it for devedge.

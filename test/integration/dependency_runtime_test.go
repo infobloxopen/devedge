@@ -25,14 +25,14 @@ type recordingFake struct {
 	dropped []depruntime.Binding
 }
 
-func (f *recordingFake) EnsureInstance(_ context.Context, e depruntime.Engine, _ string) (depruntime.Instance, error) {
+func (f *recordingFake) EnsureInstance(_ context.Context, ref depruntime.InstanceRef) (depruntime.Instance, error) {
 	port := 5432
-	if e == depruntime.EngineRedis {
+	if ref.Engine == depruntime.EngineRedis {
 		port = 6379
 	}
-	return depruntime.Instance{Engine: e, Host: string(e) + ".dev.test", Port: port}, nil
+	return depruntime.Instance{Engine: ref.Engine, Host: string(ref.Engine) + ".dev.test", Port: port}, nil
 }
-func (f *recordingFake) Ready(context.Context, depruntime.Engine) error { return nil }
+func (f *recordingFake) Ready(context.Context, depruntime.InstanceRef) error { return nil }
 func (f *recordingFake) EnsureDatabase(_ context.Context, b depruntime.Binding) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -85,7 +85,7 @@ func TestDependencyUp_postgres(t *testing.T) {
 	ctx := context.Background()
 	deps := []daemon.DependencyRequest{{Name: "db", Engine: "postgres", Port: 5432}}
 
-	results, err := c.ApplyDependencies(ctx, "webhooks", deps)
+	results, err := c.ApplyDependencies(ctx, "webhooks", daemon.ApplyRequest{Dependencies: deps})
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestDependencyUp_postgres(t *testing.T) {
 	}
 
 	// Idempotent re-apply.
-	if _, err := c.ApplyDependencies(ctx, "webhooks", deps); err != nil {
+	if _, err := c.ApplyDependencies(ctx, "webhooks", daemon.ApplyRequest{Dependencies: deps}); err != nil {
 		t.Fatalf("re-apply: %v", err)
 	}
 }
@@ -119,10 +119,10 @@ func TestDependencyIsolation(t *testing.T) {
 	ctx := context.Background()
 	deps := []daemon.DependencyRequest{{Name: "db", Engine: "postgres", Port: 5432}}
 
-	if _, err := c.ApplyDependencies(ctx, "svc-a", deps); err != nil {
+	if _, err := c.ApplyDependencies(ctx, "svc-a", daemon.ApplyRequest{Dependencies: deps}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyDependencies(ctx, "svc-b", deps); err != nil {
+	if _, err := c.ApplyDependencies(ctx, "svc-b", daemon.ApplyRequest{Dependencies: deps}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,10 +145,10 @@ func TestDependencyIsolation_redis(t *testing.T) {
 	ctx := context.Background()
 	deps := []daemon.DependencyRequest{{Name: "cache", Engine: "redis", Port: 6379}}
 
-	if _, err := c.ApplyDependencies(ctx, "svc-a", deps); err != nil {
+	if _, err := c.ApplyDependencies(ctx, "svc-a", daemon.ApplyRequest{Dependencies: deps}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyDependencies(ctx, "svc-b", deps); err != nil {
+	if _, err := c.ApplyDependencies(ctx, "svc-b", daemon.ApplyRequest{Dependencies: deps}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestDependencyDown_keepVsClean(t *testing.T) {
 	dsnPath := filepath.Join(baseDir, "services", "webhooks", "db.dsn")
 
 	mustApply := func() {
-		if _, err := c.ApplyDependencies(ctx, "webhooks", deps); err != nil {
+		if _, err := c.ApplyDependencies(ctx, "webhooks", daemon.ApplyRequest{Dependencies: deps}); err != nil {
 			t.Fatal(err)
 		}
 	}

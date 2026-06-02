@@ -18,17 +18,17 @@ import (
 // apiFakeProv is a no-op Provisioner: every binding provisions and is ready.
 type apiFakeProv struct{}
 
-func (apiFakeProv) EnsureInstance(_ context.Context, e depruntime.Engine, _ string) (depruntime.Instance, error) {
-	return depruntime.Instance{Engine: e, Host: string(e) + ".dev.test", Port: 5432}, nil
+func (apiFakeProv) EnsureInstance(_ context.Context, ref depruntime.InstanceRef) (depruntime.Instance, error) {
+	return depruntime.Instance{Engine: ref.Engine, Host: string(ref.Engine) + ".dev.test", Port: 5432}, nil
 }
-func (apiFakeProv) Ready(context.Context, depruntime.Engine) error           { return nil }
+func (apiFakeProv) Ready(context.Context, depruntime.InstanceRef) error       { return nil }
 func (apiFakeProv) EnsureDatabase(context.Context, depruntime.Binding) error { return nil }
 func (apiFakeProv) DropDatabase(context.Context, depruntime.Binding) error   { return nil }
 
 func depAPI(t *testing.T) http.Handler {
 	t.Helper()
-	rec := depruntime.NewReconciler(apiFakeProv{}, t.TempDir(), 0)
-	mgr := NewDepManager(rec, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	factory := func(string, string) depruntime.Provisioner { return apiFakeProv{} }
+	mgr := NewDepManager(factory, t.TempDir(), 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return NewAPI(registry.New(), mgr, slog.Default()).Handler()
 }
 
@@ -38,7 +38,7 @@ func TestDependencyEndpoints(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	body, _ := json.Marshal([]DependencyRequest{{Name: "db", Engine: "postgres", Port: 5432}})
+	body, _ := json.Marshal(ApplyRequest{Dependencies: []DependencyRequest{{Name: "db", Engine: "postgres", Port: 5432}}})
 	req, _ := http.NewRequest("PUT", srv.URL+"/v1/services/webhooks/dependencies", bytes.NewReader(body))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

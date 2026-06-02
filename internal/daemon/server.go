@@ -83,6 +83,7 @@ type Server struct {
 	depBaseDir    string
 	reg           *registry.Registry
 	rec           *reconciler.Reconciler
+	depMgr        *DepManager
 	api           *API
 	logger        *slog.Logger
 }
@@ -179,17 +180,27 @@ func NewServer(opts ...ServerOption) *Server {
 	s.rec = reconciler.New(s.configDir, s.reg, recOpts...)
 	s.reg.SetOnChange(s.rec.OnEvent)
 
-	// Dependency runtime: a Helm-backed provisioner by default (tests inject a
-	// fake), writing DSN files under the devedge home unless overridden.
-	if s.prov == nil {
-		s.prov = depruntime.NewHelmProvisioner("")
-	}
 	if s.depBaseDir == "" {
 		s.depBaseDir = devedgeDir()
 	}
-	depMgr := NewDepManager(depruntime.NewReconciler(s.prov, s.depBaseDir, 0), s.logger)
+	// Dependency runtime: build a provisioner per resolved cluster target (004).
+	// A test-injected provisioner (WithProvisioner) is reused for every target so
+	// unit tests stay hermetic; otherwise a Helm-backed provisioner is built
+	// lazily per (kube context, namespace). Empty context = current context, which
+	// preserves the pre-topology behavior. DSN files are written under the devedge
+	// home unless overridden.
+	var factory ProvisionerFactory
+	if s.prov != nil {
+		injected := s.prov
+		factory = func(string, string) depruntime.Provisioner { return injected }
+	} else {
+		factory = func(kubeContext, namespace string) depruntime.Provisioner {
+			return depruntime.NewHelmProvisionerNS(kubeContext, namespace)
+		}
+	}
+	s.depMgr = NewDepManager(factory, s.depBaseDir, 0, s.logger)
 
-	s.api = NewAPI(s.reg, depMgr, s.logger)
+	s.api = NewAPI(s.reg, s.depMgr, s.logger)
 	return s
 }
 
@@ -301,10 +312,8 @@ func (s *Server) Run(ctx context.Context) error {
 		if tcpSrv != nil {
 			tcpSrv.Shutdown(context.Background())
 		}
-		// Stop any supervised dependency port-forwards.
-		if c, ok := s.prov.(interface{ Close() }); ok {
-			c.Close()
-		}
+		// Stop all per-target dependency provisioners (supervised port-forwards).
+		s.depMgr.Close()
 	}()
 
 	s.logger.Info("devedged listening",

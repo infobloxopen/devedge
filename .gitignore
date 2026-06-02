@@ -2,3 +2,4 @@ bin/
 /de
 *.tmp
 .DS_Store
+.claude/worktrees/

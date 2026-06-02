@@ -21,17 +21,27 @@ type HelmProvisioner struct {
 	namespace   string
 
 	mu       sync.Mutex
-	forwards map[Engine]*cluster.PortForward
+	forwards map[string]*cluster.PortForward // keyed by release (shared or per-service dedicated)
 }
 
 // NewHelmProvisioner targets the given kube context (empty = current context),
 // installing shared instances into helm.DefaultNamespace.
 func NewHelmProvisioner(kubeContext string) *HelmProvisioner {
+	return NewHelmProvisionerNS(kubeContext, helm.DefaultNamespace)
+}
+
+// NewHelmProvisionerNS targets a specific kube context and dependency namespace.
+// An empty namespace falls back to helm.DefaultNamespace. This is the form the
+// daemon uses to build a provisioner per resolved cluster (004).
+func NewHelmProvisionerNS(kubeContext, namespace string) *HelmProvisioner {
+	if namespace == "" {
+		namespace = helm.DefaultNamespace
+	}
 	return &HelmProvisioner{
 		helm:        helm.New(kubeContext),
 		kubeContext: kubeContext,
-		namespace:   helm.DefaultNamespace,
-		forwards:    map[Engine]*cluster.PortForward{},
+		namespace:   namespace,
+		forwards:    map[string]*cluster.PortForward{},
 	}
 }
 
@@ -44,60 +54,71 @@ func (p *HelmProvisioner) Close() {
 	}
 }
 
-// ensureForward returns the local port of a live forward to the engine's pod,
-// (re)starting it if absent or dead. forward-ephemeral connectivity mode.
-func (p *HelmProvisioner) ensureForward(engine Engine, target string, remotePort int) (int, error) {
+// ensureForward returns the local port of a live forward to the release's pod,
+// (re)starting it if absent or dead. Keyed by release so the shared instance and
+// any per-service dedicated instances each get their own forward.
+func (p *HelmProvisioner) ensureForward(release, target string, remotePort int) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if pf := p.forwards[engine]; pf != nil && pf.Alive() {
+	if pf := p.forwards[release]; pf != nil && pf.Alive() {
 		return pf.LocalPort, nil
 	}
 	pf, err := cluster.StartPortForward(p.kubeContext, p.namespace, target, remotePort)
 	if err != nil {
 		return 0, err
 	}
-	p.forwards[engine] = pf
+	p.forwards[release] = pf
 	return pf.LocalPort, nil
 }
 
-func chartFor(e Engine) (chart, release, target string, port int, err error) {
-	switch e {
+// instanceFor maps an InstanceRef to its chart, Helm release, kubectl exec/forward
+// target, and engine port. The shared instance uses the base release name; a
+// dedicated instance (FR-016) appends the service slug, yielding an isolated
+// release that coexists with the shared one (the chart names all resources from
+// the release name).
+func instanceFor(ref InstanceRef) (chart, release, target string, port int, err error) {
+	switch ref.Engine {
 	case EnginePostgres:
-		return helm.ChartPostgres, "devedge-postgres", "statefulset/devedge-postgres", 5432, nil
+		chart, release, port = helm.ChartPostgres, "devedge-postgres", 5432
 	case EngineRedis:
-		return helm.ChartRedis, "devedge-redis", "statefulset/devedge-redis", 6379, nil
+		chart, release, port = helm.ChartRedis, "devedge-redis", 6379
 	default:
-		return "", "", "", 0, fmt.Errorf("engine %q has no runtime support", e)
+		return "", "", "", 0, fmt.Errorf("engine %q has no runtime support", ref.Engine)
 	}
+	if ref.Dedicated {
+		release = release + "-" + cluster.ProjectSlug(ref.Service)
+	}
+	target = "statefulset/" + release
+	return chart, release, target, port, nil
 }
 
-func (p *HelmProvisioner) EnsureInstance(ctx context.Context, engine Engine, version string) (Instance, error) {
-	chart, release, target, port, err := chartFor(engine)
+func (p *HelmProvisioner) EnsureInstance(ctx context.Context, ref InstanceRef) (Instance, error) {
+	chart, release, target, port, err := instanceFor(ref)
 	if err != nil {
 		return Instance{}, err
 	}
 	var values map[string]any
-	if version != "" {
-		values = map[string]any{"image": map[string]any{"tag": version}}
+	if ref.Version != "" {
+		values = map[string]any{"image": map[string]any{"tag": ref.Version}}
 	}
 	if err := p.helm.Install(ctx, chart, release, p.namespace, values); err != nil {
 		return Instance{}, err
 	}
 	// Reach the in-cluster instance from the host via an ephemeral port-forward;
 	// the indirect DSN hides the dynamic port from the app (research decision 1).
-	localPort, err := p.ensureForward(engine, target, port)
+	localPort, err := p.ensureForward(release, target, port)
 	if err != nil {
-		return Instance{}, fmt.Errorf("port-forward %s: %w", engine, err)
+		return Instance{}, fmt.Errorf("port-forward %s: %w", release, err)
 	}
-	return Instance{Engine: engine, Host: "127.0.0.1", Port: localPort}, nil
+	return Instance{Engine: ref.Engine, Host: "127.0.0.1", Port: localPort}, nil
 }
 
-func (p *HelmProvisioner) Ready(ctx context.Context, engine Engine) error {
-	_, _, target, _, err := chartFor(engine)
+func (p *HelmProvisioner) Ready(ctx context.Context, ref InstanceRef) error {
+	_, _, target, _, err := instanceFor(ref)
 	if err != nil {
 		return err
 	}
-	switch engine {
+	switch ref.Engine {
 	case EnginePostgres:
 		_, err = cluster.KubectlExec(ctx, p.kubeContext, p.namespace, target, "", "pg_isready", "-U", "postgres")
 	case EngineRedis:
@@ -122,7 +143,7 @@ func (p *HelmProvisioner) EnsureDatabase(ctx context.Context, b Binding) error {
 }
 
 func (p *HelmProvisioner) ensurePostgres(ctx context.Context, b Binding) error {
-	_, _, target, _, _ := chartFor(EnginePostgres)
+	_, _, target, _, _ := instanceFor(b.instanceRef())
 	// Idempotent role create + password sync (names are sanitized identifiers,
 	// password is hex — safe to inline).
 	roleSQL := fmt.Sprintf(
@@ -146,7 +167,7 @@ func (p *HelmProvisioner) ensurePostgres(ctx context.Context, b Binding) error {
 }
 
 func (p *HelmProvisioner) ensureRedis(ctx context.Context, b Binding) error {
-	_, _, target, _, _ := chartFor(EngineRedis)
+	_, _, target, _, _ := instanceFor(b.instanceRef())
 	// ACL user scoped to the binding's key namespace (FR-002 isolation).
 	_, err := cluster.KubectlExec(ctx, p.kubeContext, p.namespace, target, "",
 		"redis-cli", "ACL", "SETUSER", b.User, "on", ">"+b.Password, "~"+b.KeyNamespace+"*", "+@all")
@@ -156,14 +177,14 @@ func (p *HelmProvisioner) ensureRedis(ctx context.Context, b Binding) error {
 func (p *HelmProvisioner) DropDatabase(ctx context.Context, b Binding) error {
 	switch b.Engine {
 	case EnginePostgres:
-		_, _, target, _, _ := chartFor(EnginePostgres)
+		_, _, target, _, _ := instanceFor(b.instanceRef())
 		if _, err := p.psql(ctx, target, "-c", fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", b.Database)); err != nil {
 			return err
 		}
 		_, err := p.psql(ctx, target, "-c", fmt.Sprintf("DROP ROLE IF EXISTS %s", b.User))
 		return err
 	case EngineRedis:
-		_, _, target, _, _ := chartFor(EngineRedis)
+		_, _, target, _, _ := instanceFor(b.instanceRef())
 		// Remove the binding's keys, then the ACL user. KEYS is acceptable for dev.
 		_, _ = cluster.KubectlExec(ctx, p.kubeContext, p.namespace, target, "",
 			"redis-cli", "EVAL", "for _,k in ipairs(redis.call('keys', ARGV[1])) do redis.call('del', k) end", "0", b.KeyNamespace+"*")

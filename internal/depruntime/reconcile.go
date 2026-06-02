@@ -81,13 +81,14 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 		return fail(fmt.Errorf("dependency %q: engine %q has no runtime support (supported: %v)", d.Name, d.Engine, SupportedEngines))
 	}
 
-	inst, err := r.prov.EnsureInstance(ctx, d.Engine, d.Version)
+	ref := InstanceRef{Engine: d.Engine, Version: d.Version, Dedicated: d.Dedicated, Service: service}
+	inst, err := r.prov.EnsureInstance(ctx, ref)
 	if err != nil {
 		return fail(fmt.Errorf("dependency %q: ensure %s instance: %w", d.Name, d.Engine, err))
 	}
 	res.State = StateInstanceReady
 
-	if err := r.waitReady(ctx, d.Engine); err != nil {
+	if err := r.waitReady(ctx, ref); err != nil {
 		return fail(fmt.Errorf("dependency %q: %s not ready within %s: %w", d.Name, d.Engine, r.readinessTimeout, err))
 	}
 
@@ -140,13 +141,13 @@ func (r *Reconciler) Release(ctx context.Context, service string, deps []Dep, cl
 
 // waitReady polls the provisioner's readiness probe with backoff, bounded by the
 // reconciler's timeout (FR-004). Honors context cancellation.
-func (r *Reconciler) waitReady(ctx context.Context, engine Engine) error {
+func (r *Reconciler) waitReady(ctx context.Context, ref InstanceRef) error {
 	ctx, cancel := context.WithTimeout(ctx, r.readinessTimeout)
 	defer cancel()
 
 	backoff := 200 * time.Millisecond
 	for {
-		err := r.prov.Ready(ctx, engine)
+		err := r.prov.Ready(ctx, ref)
 		if err == nil {
 			return nil
 		}

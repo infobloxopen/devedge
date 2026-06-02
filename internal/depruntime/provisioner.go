@@ -30,15 +30,27 @@ func Supported(e Engine) bool {
 // Dep is a minimal, config-decoupled view of one declared dependency (the daemon
 // maps pkg/config.Dependency onto this to avoid an import cycle).
 type Dep struct {
-	Name    string
-	Engine  Engine
-	Version string
-	Port    int
+	Name      string
+	Engine    Engine
+	Version   string
+	Port      int
+	Dedicated bool // FR-016: provision an isolated per-service instance, not the shared one
 }
 
-// Binding is a service's isolated slice of a shared instance — the unit a wipe
-// targets. For Postgres: a database + role + password. For Redis: an ACL user +
-// password + key namespace / logical DB index.
+// InstanceRef identifies which engine instance a dependency targets: the shared
+// per-engine instance (Dedicated false), or a per-service dedicated instance
+// (Dedicated true, named from Service) — FR-016.
+type InstanceRef struct {
+	Engine    Engine
+	Version   string
+	Dedicated bool
+	Service   string // names the dedicated release; ignored when Dedicated is false
+}
+
+// Binding is a service's isolated slice of an instance — the unit a wipe targets.
+// For Postgres: a database + role + password. For Redis: an ACL user + password +
+// key namespace / logical DB index. Dedicated selects which instance the slice
+// lives in (the shared per-engine one, or this service's own — FR-016).
 type Binding struct {
 	Service      string
 	Dependency   string
@@ -47,6 +59,12 @@ type Binding struct {
 	User         string
 	Password     string
 	KeyNamespace string // redis only
+	Dedicated    bool   // targets this service's dedicated instance instead of the shared one
+}
+
+// instanceRef returns the InstanceRef this binding's slice lives in.
+func (b Binding) instanceRef() InstanceRef {
+	return InstanceRef{Engine: b.Engine, Dedicated: b.Dedicated, Service: b.Service}
 }
 
 // Instance describes a reachable shared instance for an engine.
@@ -59,11 +77,11 @@ type Instance struct {
 // Provisioner is the cluster adapter. Implementations must be idempotent:
 // EnsureInstance/EnsureDatabase create-if-absent and never destroy data.
 type Provisioner interface {
-	// EnsureInstance ensures the shared instance for engine (version optional) is
-	// installed and returns how to reach it.
-	EnsureInstance(ctx context.Context, engine Engine, version string) (Instance, error)
-	// Ready returns nil once the engine's instance accepts connections.
-	Ready(ctx context.Context, engine Engine) error
+	// EnsureInstance ensures the instance identified by ref (shared per-engine, or
+	// a per-service dedicated one) is installed and returns how to reach it.
+	EnsureInstance(ctx context.Context, ref InstanceRef) (Instance, error)
+	// Ready returns nil once the referenced instance accepts connections.
+	Ready(ctx context.Context, ref InstanceRef) error
 	// EnsureDatabase idempotently provisions the binding's isolated db/role/ACL.
 	EnsureDatabase(ctx context.Context, b Binding) error
 	// DropDatabase removes only this binding's isolation slice (never the instance).

@@ -73,6 +73,24 @@ See `.claude/skills/README.md` for the template and conventions.
 - N/A (parses a local YAML file; no persistence added) (002-service-config-kind)
 - Go 1.25.5 + `helm`/`kubectl`/`k3d` CLIs (subprocess; no Helm SDK / client-go), `go:embed` Helm charts, `gopkg.in/yaml.v3` (003-dependency-runtime)
 - Shared Postgres/Redis in-cluster (Helm, PVC-backed); real-DSN files under `~/.devedge/`; no DB in devedge itself (003-dependency-runtime)
+- Go 1.23 (existing devedge module) + existing `internal/cluster` (k3d `Provider`, `Bootstrap`, `ValidateLocalCluster`, `PortForward`), `internal/helm` (`DefaultNamespace = "devedge-deps"`), `internal/depruntime` (`HelmProvisioner`, `Reconciler`), `internal/daemon` (HTTP API + `DepManager`), `internal/client`, `pkg/config` (`ServiceConfig`). External CLIs already required: `k3d`, `kubectl`, `helm`, container runtime (docker). (004-cluster-topology)
+- cluster state is k3d/Docker; per-service dependency data persists in PVCs (003, unchanged); a host-level lockfile under `~/.devedge/` guards concurrent cluster-ensure. (004-cluster-topology)
+
+## Cluster topology model (004-cluster-topology)
+
+`de project up` resolves every project to an explicit cluster target — never the ambient kube context:
+
+- **Developer machine (default)**: shared cluster `devedge`, ensured once, reused by all projects.
+  Printed as `cluster: devedge (shared dev)`.
+- **CI / ephemeral** (`CI=true` or `--env ci`): dedicated per-run cluster `devedge-ci-<runid>`.
+- **`spec.cluster.dedicated: true`**: project-own cluster `devedge-proj-<slug>`.
+
+`de ci run -- <command...>` wraps a command with a full ephemeral-cluster lifecycle (create →
+run → always-teardown, deferred + signal-trapped). Uses `DEVEDGE_KUBECONTEXT` to scope the
+child process; never mutates the user's global kube context. Implemented in `cmd/de/ci.go`.
+
+Cluster ensure logic (idempotent, host-`flock`, cert-manager bootstrap) lives in
+`internal/cluster/ensure.go`. Topology resolution is in `internal/cluster/topology.go`.
 
 ## Recent Changes
 - 001-fix-dns-udp-bind: Added Go 1.25.5 (from `go.mod`)

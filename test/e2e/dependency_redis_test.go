@@ -61,14 +61,14 @@ func TestRedisDependency_e2e(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	inst, err := prov.EnsureInstance(ctx, depruntime.EngineRedis, "7")
+	inst, err := prov.EnsureInstance(ctx, depruntime.InstanceRef{Engine: depruntime.EngineRedis, Version: "7"})
 	if err != nil {
 		t.Fatalf("EnsureInstance: %v", err)
 	}
 
 	ready := false
 	for i := 0; i < 30; i++ {
-		if err := prov.Ready(ctx, depruntime.EngineRedis); err == nil {
+		if err := prov.Ready(ctx, depruntime.InstanceRef{Engine: depruntime.EngineRedis}); err == nil {
 			ready = true
 			break
 		}

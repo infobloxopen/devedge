@@ -39,12 +39,22 @@ func NewAPI(reg *registry.Registry, deps *DepManager, logger *slog.Logger) *API 
 	return a
 }
 
-// DependencyRequest is one declared dependency in a PUT .../dependencies body.
+// DependencyRequest is one declared dependency in an ApplyRequest.
 type DependencyRequest struct {
-	Name    string `json:"name"`
-	Engine  string `json:"engine"`
-	Version string `json:"version,omitempty"`
-	Port    int    `json:"port,omitempty"`
+	Name      string `json:"name"`
+	Engine    string `json:"engine"`
+	Version   string `json:"version,omitempty"`
+	Port      int    `json:"port,omitempty"`
+	Dedicated bool   `json:"dedicated,omitempty"` // FR-016: isolated per-service instance
+}
+
+// ApplyRequest is the PUT .../dependencies body: the declared dependencies plus
+// the resolved cluster target they should be provisioned against (004). An empty
+// KubeContext preserves the pre-topology behavior (current kube context).
+type ApplyRequest struct {
+	KubeContext  string              `json:"kubeContext,omitempty"`
+	Namespace    string              `json:"namespace,omitempty"`
+	Dependencies []DependencyRequest `json:"dependencies"`
 }
 
 func (a *API) applyDependencies(w http.ResponseWriter, r *http.Request) {
@@ -52,16 +62,17 @@ func (a *API) applyDependencies(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dependency runtime not enabled", http.StatusNotImplemented)
 		return
 	}
-	var reqs []DependencyRequest
-	if err := json.NewDecoder(r.Body).Decode(&reqs); err != nil {
+	var req ApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	deps := make([]depruntime.Dep, len(reqs))
-	for i, q := range reqs {
-		deps[i] = depruntime.Dep{Name: q.Name, Engine: depruntime.Engine(q.Engine), Version: q.Version, Port: q.Port}
+	deps := make([]depruntime.Dep, len(req.Dependencies))
+	for i, q := range req.Dependencies {
+		deps[i] = depruntime.Dep{Name: q.Name, Engine: depruntime.Engine(q.Engine), Version: q.Version, Port: q.Port, Dedicated: q.Dedicated}
 	}
-	results := a.deps.Apply(r.Context(), r.PathValue("service"), deps)
+	target := Target{KubeContext: req.KubeContext, Namespace: req.Namespace}
+	results := a.deps.Apply(r.Context(), r.PathValue("service"), target, deps)
 	writeJSON(w, http.StatusOK, results)
 }
 

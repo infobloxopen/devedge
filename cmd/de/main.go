@@ -14,10 +14,24 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/infobloxopen/devedge/internal/client"
+	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/daemon"
 	"github.com/infobloxopen/devedge/internal/version"
 	"github.com/infobloxopen/devedge/pkg/config"
 )
+
+// clusterMode is the human-readable topology mode for the `cluster: <name> (<mode>)`
+// line printed by `de project up` (FR-003).
+func clusterMode(t cluster.ClusterTarget) string {
+	switch {
+	case t.Ephemeral:
+		return "ephemeral"
+	case t.Dedicated:
+		return "dedicated"
+	default:
+		return "shared dev"
+	}
+}
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -49,6 +63,7 @@ func rootCmd() *cobra.Command {
 		inspectCmd(),
 		projectCmd(),
 		clusterCmd(),
+		ciCmd(),
 		k3dAliasCmd(),
 		uiCmd(),
 	)
@@ -229,6 +244,7 @@ func projectCmd() *cobra.Command {
 func projectUpCmd() *cobra.Command {
 	var file string
 	var watch bool
+	var envOverride string
 
 	cmd := &cobra.Command{
 		Use:   "up",
@@ -253,11 +269,31 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 
 			c := newClient()
 
-			// Start declared dependencies (FR-001). Engaged only when a Service
-			// declares dependencies — kind: Config and no-deps Services are
-			// unaffected (FR-013).
+			// Resolve the target cluster from the environment (FR-001/009) and
+			// report where this project lands (FR-003). Resolution is always done
+			// (even for a no-deps project) so the placement is observable; the
+			// cluster is only *ensured* when there is something to provision on it.
+			provider := defaultProvider()
+			env := cluster.DetectEnvironment(envOverride)
+			dedicated := false
+			if cp, ok := res.(config.ClusterPreferrer); ok {
+				dedicated = cp.ClusterDedicated()
+			}
+			target := cluster.Resolve(provider, env, res.Project(), dedicated)
+			fmt.Printf("%s %s %s\n", colorLabel.Sprint("cluster:"), colorHost.Sprint(target.Name), colorLabel.Sprintf("(%s)", clusterMode(target)))
+
+			// Start declared dependencies on the resolved cluster (FR-001/002).
+			// Engaged only when a Service declares dependencies — kind: Config and
+			// no-deps Services are unaffected (FR-013) and skip cluster ensure.
 			if dd, ok := res.(config.DependencyDeclarer); ok && len(dd.Dependencies()) > 0 {
-				if err := provisionDependencies(c, res.Project(), dd.Dependencies()); err != nil {
+				// Ensure the resolved cluster exists + is bootstrapped before
+				// provisioning. A failure exits non-zero with an actionable,
+				// retryable message and leaves no half-created cluster (FR-002/011/012).
+				ensurer := cluster.NewEnsurer(provider)
+				if err := ensurer.EnsureCluster(context.Background(), target.Name); err != nil {
+					return err
+				}
+				if err := provisionDependencies(c, res.Project(), dd.Dependencies(), target); err != nil {
 					return err
 				}
 			}
@@ -308,26 +344,37 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "devedge.yaml", "project config file")
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "stay running and send lease heartbeats")
+	cmd.Flags().StringVar(&envOverride, "env", "", "environment override: dev|ci|ephemeral (default: auto-detect from CI)")
 	return cmd
 }
 
 func projectDownCmd() *cobra.Command {
 	var project string
 	var clean bool
+	var file string
 
 	cmd := &cobra.Command{
 		Use:   "down [PROJECT]",
 		Short: "Remove all routes for a project",
-		Args:  cobra.MaximumNArgs(1),
+		// Footprint-only (FR-005): down releases ONLY the requesting project's
+		// routes and dependency bindings on whatever cluster they were applied to.
+		// It never deletes the shared cluster or another project's footprint. The
+		// one destructive exception is a project on its OWN dedicated cluster:
+		// `--clean` then removes that dedicated cluster (US4 AS3) — never the shared.
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Load the local config (best-effort) to learn the project name and
+			// whether it opted into a dedicated cluster.
+			var res config.Resource
+			if loaded, err := config.LoadResource(file); err == nil {
+				res = loaded
+			}
 			if len(args) > 0 {
 				project = args[0]
 			}
 			if project == "" {
-				// Try to read from devedge.yaml.
-				res, err := config.LoadResource("devedge.yaml")
-				if err != nil {
-					return fmt.Errorf("project name required (pass as argument or use devedge.yaml)")
+				if res == nil {
+					return fmt.Errorf("project name required (pass as argument or use %s)", file)
 				}
 				project = res.Project()
 			}
@@ -348,10 +395,30 @@ func projectDownCmd() *cobra.Command {
 			if clean {
 				fmt.Printf("dropped dependency data for project %s\n", colorHost.Sprint(project))
 			}
+
+			// Destructive teardown of a DEDICATED cluster: the cluster is this
+			// project's alone, so `--clean` removes it. Guarded so it only fires for
+			// the local config's own dedicated project — never the shared cluster
+			// and never another project (FR-005/FR-010/US4 AS3).
+			if clean && res != nil && project == res.Project() && isDedicated(res) {
+				provider := defaultProvider()
+				target := cluster.Resolve(provider, cluster.DetectEnvironment(""), project, true)
+				if err := cluster.NewEnsurer(provider).Teardown(target.Name); err != nil {
+					return fmt.Errorf("remove dedicated cluster %q: %w", target.Name, err)
+				}
+				fmt.Printf("removed dedicated cluster %s\n", colorHost.Sprint(target.Name))
+			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&clean, "clean", false, "also destroy this project's dependency data (default keeps it)")
+	cmd.Flags().BoolVar(&clean, "clean", false, "also destroy this project's dependency data; for a dedicated-cluster project, remove its cluster")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "project name")
+	cmd.Flags().StringVarP(&file, "file", "f", "devedge.yaml", "project config file (to detect a dedicated cluster)")
 	return cmd
+}
+
+// isDedicated reports whether a loaded resource opted into a dedicated cluster.
+func isDedicated(res config.Resource) bool {
+	cp, ok := res.(config.ClusterPreferrer)
+	return ok && cp.ClusterDedicated()
 }

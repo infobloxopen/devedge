@@ -6,6 +6,78 @@ import (
 	"testing"
 )
 
+// T020: spec.cluster.dedicated and dependencies[].dedicated strict-decode + defaults.
+func TestParseService_dedicatedOptIns(t *testing.T) {
+	doc := `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: my-svc
+spec:
+  dev:
+    hostname: my-svc.dev.test
+  cluster:
+    dedicated: true
+  dependencies:
+    - name: db
+      engine: postgres
+      port: 5432
+      dedicated: true
+`
+	cfg, err := ParseService([]byte(doc))
+	if err != nil {
+		t.Fatalf("ParseService: %v", err)
+	}
+	if !cfg.Spec.Cluster.Dedicated || !cfg.ClusterDedicated() {
+		t.Error("spec.cluster.dedicated did not decode to true")
+	}
+	if len(cfg.Spec.Dependencies) != 1 || !cfg.Spec.Dependencies[0].Dedicated {
+		t.Errorf("dependencies[0].dedicated did not decode: %+v", cfg.Spec.Dependencies)
+	}
+}
+
+// T020: both opt-ins default to false when omitted.
+func TestParseService_dedicatedDefaultsFalse(t *testing.T) {
+	doc := `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: my-svc
+spec:
+  dev:
+    hostname: my-svc.dev.test
+  dependencies:
+    - name: db
+      engine: postgres
+      port: 5432
+`
+	cfg, err := ParseService([]byte(doc))
+	if err != nil {
+		t.Fatalf("ParseService: %v", err)
+	}
+	if cfg.ClusterDedicated() {
+		t.Error("cluster.dedicated should default to false")
+	}
+	if cfg.Spec.Dependencies[0].Dedicated {
+		t.Error("dependencies[].dedicated should default to false")
+	}
+}
+
+// T020: strict decode still rejects unknown fields inside the new cluster block.
+func TestParseService_rejectsUnknownClusterField(t *testing.T) {
+	doc := `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: my-svc
+spec:
+  dev:
+    hostname: my-svc.dev.test
+  cluster:
+    bogus: true
+`
+	if _, err := ParseService([]byte(doc)); err == nil {
+		t.Error("expected strict decode to reject unknown spec.cluster field")
+	}
+}
+
 func serviceWithDeps(deps string) []byte {
 	return []byte(`
 apiVersion: devedge.infoblox.dev/v1alpha1

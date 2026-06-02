@@ -77,6 +77,7 @@ func IdentityBinding(service string, d Dep) Binding {
 		Engine:     d.Engine,
 		Database:   DatabaseName(service, d.Name),
 		User:       RoleName(service, d.Name),
+		Dedicated:  d.Dedicated,
 	}
 	if d.Engine == EngineRedis {
 		b.KeyNamespace = KeyNamespace(service, d.Name)

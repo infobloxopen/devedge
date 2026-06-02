@@ -25,6 +25,7 @@ type ServiceConfig struct {
 // ServiceSpec holds the desired state for a service.
 type ServiceSpec struct {
 	Dev          ServiceDev   `yaml:"dev"`
+	Cluster      ClusterSpec  `yaml:"cluster,omitempty"`
 	Dependencies []Dependency `yaml:"dependencies,omitempty"`
 	Routes       []RouteEntry `yaml:"routes,omitempty"`
 }
@@ -34,13 +35,23 @@ type ServiceDev struct {
 	Hostname string `yaml:"hostname"`
 }
 
-// Dependency is a runtime dependency declared by a service. It is validated and
-// reported here but started by a later runtime feature.
+// ClusterSpec is the optional cluster-placement block for a service (004).
+type ClusterSpec struct {
+	// Dedicated opts the service onto its own cluster (devedge-proj-<slug>) instead
+	// of the shared dev cluster (FR-010). Default false.
+	Dedicated bool `yaml:"dedicated,omitempty"`
+}
+
+// Dependency is a runtime dependency declared by a service.
 type Dependency struct {
 	Name    string `yaml:"name"`
 	Engine  string `yaml:"engine"`
 	Version string `yaml:"version,omitempty"`
 	Port    int    `yaml:"port"`
+	// Dedicated requests an isolated, per-service instance of the engine instead of
+	// attaching to the shared per-engine instance (FR-016, rare). Default false;
+	// only meaningful for a recognized engine.
+	Dedicated bool `yaml:"dedicated,omitempty"`
 }
 
 // ParseService strictly decodes a `kind: Service` document (unknown fields are
@@ -174,6 +185,12 @@ func (c *ServiceConfig) ToRoutes() ([]types.Route, error) {
 // DependencyDeclarer.
 func (c *ServiceConfig) Dependencies() []Dependency {
 	return c.Spec.Dependencies
+}
+
+// ClusterDedicated reports whether the service opted into a dedicated cluster
+// (spec.cluster.dedicated), satisfying ClusterPreferrer (FR-010).
+func (c *ServiceConfig) ClusterDedicated() bool {
+	return c.Spec.Cluster.Dedicated
 }
 
 // enginePorts maps a recognized engine to its standard port.

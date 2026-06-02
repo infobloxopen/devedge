@@ -63,7 +63,7 @@ func TestPostgresDependency_e2e(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	inst, err := prov.EnsureInstance(ctx, depruntime.EnginePostgres, "16")
+	inst, err := prov.EnsureInstance(ctx, depruntime.InstanceRef{Engine: depruntime.EnginePostgres, Version: "16"})
 	if err != nil {
 		t.Fatalf("EnsureInstance: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestPostgresDependency_e2e(t *testing.T) {
 	// server accepts connections).
 	ready := false
 	for i := 0; i < 30; i++ {
-		if err := prov.Ready(ctx, depruntime.EnginePostgres); err == nil {
+		if err := prov.Ready(ctx, depruntime.InstanceRef{Engine: depruntime.EnginePostgres}); err == nil {
 			ready = true
 			break
 		}

@@ -107,10 +107,12 @@ func (c *Client) DeregisterProject(ctx context.Context, project string) (int, er
 }
 
 // ApplyDependencies sends a service's declared dependencies to the daemon, which
-// reconciles them synchronously and returns the per-dependency results (env var +
-// DSN file path + state; never raw credentials).
-func (c *Client) ApplyDependencies(ctx context.Context, service string, deps []daemon.DependencyRequest) ([]depruntime.Result, error) {
-	body, _ := json.Marshal(deps)
+// reconciles them synchronously against the resolved cluster target and returns
+// the per-dependency results (env var + DSN file path + state; never raw
+// credentials). An empty req.KubeContext provisions against the daemon's current
+// kube context (pre-topology behavior).
+func (c *Client) ApplyDependencies(ctx context.Context, service string, req daemon.ApplyRequest) ([]depruntime.Result, error) {
+	body, _ := json.Marshal(req)
 	resp, err := c.do(ctx, "PUT", "/v1/services/"+service+"/dependencies", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
