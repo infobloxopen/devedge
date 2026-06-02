@@ -6,6 +6,92 @@ import (
 	"testing"
 )
 
+// T002: spec.workload strict-decode + validation (image XOR build, port required,
+// build requires context, replicas default 1).
+func serviceWithWorkload(workload string) []byte {
+	return []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: my-svc
+spec:
+  dev:
+    hostname: my-svc.dev.test
+  workload:
+` + workload)
+}
+
+func TestParseService_workloadImage(t *testing.T) {
+	cfg, err := ParseService(serviceWithWorkload("    image: ghcr.io/acme/my-svc:dev\n    port: 8080\n"))
+	if err != nil {
+		t.Fatalf("ParseService: %v", err)
+	}
+	w := cfg.Workload()
+	if w == nil || w.Image != "ghcr.io/acme/my-svc:dev" || w.Port != 8080 {
+		t.Fatalf("workload not decoded: %+v", w)
+	}
+	if w.EffectiveReplicas() != 1 {
+		t.Errorf("replicas default = %d, want 1", w.EffectiveReplicas())
+	}
+	if w.Build != nil {
+		t.Errorf("build should be nil for an image workload")
+	}
+}
+
+func TestParseService_workloadBuild(t *testing.T) {
+	cfg, err := ParseService(serviceWithWorkload("    build:\n      context: .\n    port: 8080\n    replicas: 3\n"))
+	if err != nil {
+		t.Fatalf("ParseService: %v", err)
+	}
+	w := cfg.Workload()
+	if w == nil || w.Build == nil || w.Build.Context != "." {
+		t.Fatalf("build workload not decoded: %+v", w)
+	}
+	if w.EffectiveReplicas() != 3 {
+		t.Errorf("replicas = %d, want 3", w.EffectiveReplicas())
+	}
+}
+
+func TestParseService_workloadValidation(t *testing.T) {
+	bad := map[string]string{
+		"image and build both set": "    image: x:y\n    build:\n      context: .\n    port: 8080\n",
+		"neither image nor build":  "    port: 8080\n",
+		"missing port":             "    image: x:y\n",
+		"port out of range":        "    image: x:y\n    port: 70000\n",
+		"build missing context":    "    build:\n      dockerfile: Dockerfile\n    port: 8080\n",
+	}
+	for name, wl := range bad {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseService(serviceWithWorkload(wl)); err == nil {
+				t.Errorf("expected validation error for %q", name)
+			}
+		})
+	}
+}
+
+func TestParseService_workloadStrictUnknownField(t *testing.T) {
+	if _, err := ParseService(serviceWithWorkload("    image: x:y\n    port: 8080\n    bogus: true\n")); err == nil {
+		t.Error("expected strict decode to reject unknown spec.workload field")
+	}
+}
+
+func TestParseService_noWorkload(t *testing.T) {
+	// A service with no workload is valid (local-run only).
+	cfg, err := ParseService([]byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: my-svc
+spec:
+  dev:
+    hostname: my-svc.dev.test
+`))
+	if err != nil {
+		t.Fatalf("ParseService: %v", err)
+	}
+	if cfg.Workload() != nil {
+		t.Errorf("expected nil workload, got %+v", cfg.Workload())
+	}
+}
+
 // T020: spec.cluster.dedicated and dependencies[].dedicated strict-decode + defaults.
 func TestParseService_dedicatedOptIns(t *testing.T) {
 	doc := `apiVersion: devedge.infoblox.dev/v1alpha1

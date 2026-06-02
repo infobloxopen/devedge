@@ -24,10 +24,38 @@ type ServiceConfig struct {
 
 // ServiceSpec holds the desired state for a service.
 type ServiceSpec struct {
-	Dev          ServiceDev   `yaml:"dev"`
-	Cluster      ClusterSpec  `yaml:"cluster,omitempty"`
-	Dependencies []Dependency `yaml:"dependencies,omitempty"`
-	Routes       []RouteEntry `yaml:"routes,omitempty"`
+	Dev          ServiceDev    `yaml:"dev"`
+	Cluster      ClusterSpec   `yaml:"cluster,omitempty"`
+	Workload     *WorkloadSpec `yaml:"workload,omitempty"`
+	Dependencies []Dependency  `yaml:"dependencies,omitempty"`
+	Routes       []RouteEntry  `yaml:"routes,omitempty"`
+}
+
+// WorkloadSpec declares the service's deployable workload (005). Optional — absent
+// means the service is local-run only. Exactly one of Image / Build is set.
+type WorkloadSpec struct {
+	// Image is a pre-built container image reference to deploy as-is.
+	Image string `yaml:"image,omitempty"`
+	// Build, when set instead of Image, builds the image from the project (FR-011).
+	Build *BuildSpec `yaml:"build,omitempty"`
+	// Port the container listens on (required).
+	Port int `yaml:"port"`
+	// Replicas to run (default 1).
+	Replicas int `yaml:"replicas,omitempty"`
+}
+
+// BuildSpec declares how to build the workload image from the project.
+type BuildSpec struct {
+	Context    string `yaml:"context"`
+	Dockerfile string `yaml:"dockerfile,omitempty"`
+}
+
+// EffectiveReplicas returns the declared replica count, defaulting to 1.
+func (w *WorkloadSpec) EffectiveReplicas() int {
+	if w.Replicas <= 0 {
+		return 1
+	}
+	return w.Replicas
 }
 
 // ServiceDev describes the service's development surface.
@@ -128,6 +156,20 @@ func (c *ServiceConfig) Validate() error {
 		return fmt.Errorf("service config: invalid 'spec.dev.hostname' %q", c.Spec.Dev.Hostname)
 	}
 
+	if w := c.Spec.Workload; w != nil {
+		hasImage := w.Image != ""
+		hasBuild := w.Build != nil
+		if hasImage == hasBuild {
+			return fmt.Errorf("service config: 'spec.workload' must set exactly one of 'image' or 'build'")
+		}
+		if hasBuild && w.Build.Context == "" {
+			return fmt.Errorf("service config: 'spec.workload.build.context' is required")
+		}
+		if w.Port < 1 || w.Port > 65535 {
+			return fmt.Errorf("service config: 'spec.workload.port' %d out of range (must be 1-65535)", w.Port)
+		}
+	}
+
 	seen := make(map[string]struct{}, len(c.Spec.Dependencies))
 	for i, d := range c.Spec.Dependencies {
 		// Identify the dependency by name when present, else by position.
@@ -191,6 +233,12 @@ func (c *ServiceConfig) Dependencies() []Dependency {
 // (spec.cluster.dedicated), satisfying ClusterPreferrer (FR-010).
 func (c *ServiceConfig) ClusterDedicated() bool {
 	return c.Spec.Cluster.Dedicated
+}
+
+// Workload returns the service's declared deployable workload, or nil if none,
+// satisfying WorkloadDeclarer (005).
+func (c *ServiceConfig) Workload() *WorkloadSpec {
+	return c.Spec.Workload
 }
 
 // enginePorts maps a recognized engine to its standard port.

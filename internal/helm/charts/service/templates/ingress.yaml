@@ -1,0 +1,27 @@
+{{- /*
+  Ingress for the deployed workload's dev hostname (005). Annotated
+  devedge.io/expose so the devedge external-dns webhook / ingress watch registers
+  the route with the daemon, making the service reachable over spec.dev.hostname.
+*/ -}}
+{{- if .Values.service.hostname }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "service.name" . }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+  annotations:
+    devedge.io/expose: "true"
+spec:
+  rules:
+    - host: {{ .Values.service.hostname | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "service.name" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

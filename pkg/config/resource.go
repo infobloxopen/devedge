@@ -45,6 +45,13 @@ type DependencyDeclarer interface {
 	Dependencies() []Dependency
 }
 
+// WorkloadDeclarer is implemented by kinds that can declare a deployable workload
+// (spec.workload). Service implements it; Config does not. The CLI type-asserts to
+// decide whether `de project up --deploy` has anything to deploy (005).
+type WorkloadDeclarer interface {
+	Workload() *WorkloadSpec
+}
+
 // ClusterPreferrer is implemented by kinds that can opt into a dedicated cluster
 // (spec.cluster.dedicated). Service implements it; Config does not (a non-Service
 // resource resolves to the shared cluster). The CLI type-asserts to read it.

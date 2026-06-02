@@ -18,7 +18,7 @@ in-cluster networking, ingress routing), so e2e coverage is central.
 
 ## Phase 1: Setup
 
-- [ ] T001 [S] Record the pre-change baseline — `make build`, `make lint`, `go test ./...` on branch `005-app-workload-deploy`; capture in the PR description (baseline for the verify/scope gate).
+- [X] T001 [S] Record the pre-change baseline — `make build`, `make lint`, `go test ./...` on branch `005-app-workload-deploy`; capture in the PR description (baseline for the verify/scope gate).
 
 ---
 
@@ -30,16 +30,16 @@ in-cluster networking, ingress routing), so e2e coverage is central.
 
 ### Tests first
 
-- [ ] T002 [P] [S] Unit tests for `spec.workload` strict-decode + validation (image XOR build, `port` required 1–65535, `replicas` default 1, build requires `context`) in `pkg/config/service_test.go` — must fail first.
-- [ ] T003 [P] [S] Unit tests for image-source resolution (reference → as-is; build → derived tag) and in-cluster DSN derivation (003 binding + in-cluster Service host → DSN) against fakes in `internal/deploy/deploy_test.go` — must fail/compile-fail first.
+- [X] T002 [P] [S] Unit tests for `spec.workload` strict-decode + validation (image XOR build, `port` required 1–65535, `replicas` default 1, build requires `context`) in `pkg/config/service_test.go` — must fail first.
+- [X] T003 [P] [S] Unit tests for image-source resolution (reference → as-is; build → derived tag) and in-cluster DSN derivation (003 binding + in-cluster Service host → DSN) against fakes in `internal/deploy/deploy_test.go` — must fail/compile-fail first.
 
 ### Implementation
 
-- [ ] T004 [S] Add the `spec.workload` block (`Image` | `Build{Context,Dockerfile}`, `Port`, `Replicas`) to `ServiceConfig` with strict decode + validation in `pkg/config/service.go`; expose a `Workload()` accessor (and a `WorkloadDeclarer` interface in `pkg/config/resource.go`).
-- [ ] T005 [C] Implement `internal/deploy` `Deployer` + `ImageBuilder` adapter interface in `internal/deploy/deploy.go`: resolve image source → ensure image present in cluster (via builder) → render + `helm upgrade --install --wait` the `service` chart with image/port/replicas/hostname/dep-env → wait Ready; actionable errors, no half-deploy (FR-002/005/007) — depends on T003.
-- [ ] T006 [C] Implement the docker/k3d `ImageBuilder` in `internal/deploy/image.go`: reference → no-op; build → `docker build -t <tag> <context>` then `k3d image import <tag> -c <cluster>` (no registry) — depends on T005.
+- [X] T004 [S] Add the `spec.workload` block (`Image` | `Build{Context,Dockerfile}`, `Port`, `Replicas`) to `ServiceConfig` with strict decode + validation in `pkg/config/service.go`; expose a `Workload()` accessor (and a `WorkloadDeclarer` interface in `pkg/config/resource.go`).
+- [X] T005 [C] Implement `internal/deploy` `Deployer` + `ImageBuilder` adapter interface in `internal/deploy/deploy.go`: resolve image source → ensure image present in cluster (via builder) → render + `helm upgrade --install --wait` the `service` chart with image/port/replicas/hostname/dep-env → wait Ready; actionable errors, no half-deploy (FR-002/005/007) — depends on T003.
+- [X] T006 [C] Implement the docker/k3d `ImageBuilder` in `internal/deploy/image.go`: reference → no-op; build → `docker build -t <tag> <context>` then `k3d image import <tag> -c <cluster>` (no registry) — depends on T005.
 - [ ] T007 [S] Implement in-cluster DSN derivation (003 `(db,user,password)` binding + in-cluster Service host `devedge-<engine>.<ns>.svc.cluster.local:<port>` → real DSN) in `internal/deploy/dsn.go` — depends on T003.
-- [ ] T008 [S] Add an `ingress.yaml` to the `service` chart (host `service.hostname`, annotated `devedge.io/expose=true`, backend → the Service) and thread `service.hostname`; confirm `deployment.yaml` dep-env references the `<svc>-<dep>-dsn` Secret, in `internal/helm/charts/service/templates/`.
+- [X] T008 [S] Add an `ingress.yaml` to the `service` chart (host `service.hostname`, annotated `devedge.io/expose=true`, backend → the Service) and thread `service.hostname`; confirm `deployment.yaml` dep-env references the `<svc>-<dep>-dsn` Secret, in `internal/helm/charts/service/templates/`.
 - [ ] T009 [C] Extend deploy-time dependency provisioning to emit the in-cluster `<service>-<dep>-dsn` Secret (key `dsn`) into the resolved cluster from the daemon's binding creds (request carries a "deploy" flag; local-run unchanged), in `internal/daemon/` + `internal/client/` — depends on T007.
 
 **Checkpoint**: config + deploy core + image adapter + in-cluster dep secret + chart Ingress exist and are unit-green.
@@ -52,9 +52,9 @@ in-cluster networking, ingress routing), so e2e coverage is central.
 
 **Independent Test**: declare a reference-image workload + a dependency; `up --deploy` → workload Ready in the resolved cluster; re-run → no duplicate; `down` → workload gone.
 
-- [ ] T010 [C] [US1] e2e (k3d) in `test/e2e/workload_deploy_test.go`: `up --deploy` of a reference-image workload deploys onto the resolved cluster and reaches Ready; idempotent re-deploy (rollout, no duplicate); `down` removes the release; failure (bad image) is actionable with no half-deploy (FR-002/005/007) — must fail first.
-- [ ] T011 [C] [US1] Wire `de project up --deploy` in `cmd/de/main.go` + `cmd/de/deploy.go`: opt-in flag → after ensure (004) + deps (003) build the `Deployer` from the resolved target + `spec.workload`, deploy, and report `deployed: <svc> -> cluster <name> (<n> replicas), https://<hostname>` (FR-002/009) — depends on T005, T006, T008, T009.
-- [ ] T012 [S] [US1] `--deploy` with no `spec.workload` exits non-zero with an actionable message in `cmd/de/deploy.go` (data-model validation) — depends on T011.
+- [X] T010 [C] [US1] e2e (k3d) in `test/e2e/workload_deploy_test.go`: `up --deploy` of a reference-image workload deploys onto the resolved cluster and reaches Ready; idempotent re-deploy (rollout, no duplicate); `down` removes the release; failure (bad image) is actionable with no half-deploy (FR-002/005/007) — must fail first.
+- [X] T011 [C] [US1] Wire `de project up --deploy` in `cmd/de/main.go` + `cmd/de/deploy.go`: opt-in flag → after ensure (004) + deps (003) build the `Deployer` from the resolved target + `spec.workload`, deploy, and report `deployed: <svc> -> cluster <name> (<n> replicas), https://<hostname>` (FR-002/009) — depends on T005, T006, T008, T009.
+- [X] T012 [S] [US1] `--deploy` with no `spec.workload` exits non-zero with an actionable message in `cmd/de/deploy.go` (data-model validation) — depends on T011.
 
 **Checkpoint**: MVP — opt-in in-cluster deploy + idempotent redeploy + down works end-to-end.
 
@@ -86,7 +86,7 @@ in-cluster networking, ingress routing), so e2e coverage is central.
 
 ## Phase 6: Teardown & Polish
 
-- [ ] T017 [C] Remove the service's workload release on `de project down` (`helm uninstall`, footprint-only — never the shared cluster or another project) in `cmd/de/main.go` (FR-006) — depends on T011.
+- [X] T017 [C] Remove the service's workload release on `de project down` (`helm uninstall`, footprint-only — never the shared cluster or another project) in `cmd/de/main.go` (FR-006) — depends on T011.
 - [ ] T018 [P] [S] Structured logging on resolve-image / build / deploy / teardown across `internal/deploy` (Principle V — report placement + workload status).
 - [ ] T019 [P] [S] Docs: update devedge `README.md` / `CLAUDE.md` / `CHANGELOG.md` for `de project up --deploy` + the `spec.workload` block, and validate every step in `specs/005-app-workload-deploy/quickstart.md`.
 - [ ] T020 [S] Final scope diff vs FR-001…FR-011 / SC-001…SC-005 in `specs/005-app-workload-deploy/SCOPE.md`; confirm no gold-plating and that local-run default behavior is unchanged when `--deploy` is absent.

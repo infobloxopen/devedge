@@ -245,6 +245,7 @@ func projectUpCmd() *cobra.Command {
 	var file string
 	var watch bool
 	var envOverride string
+	var deployFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "up",
@@ -298,6 +299,19 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 				}
 			}
 
+			// Opt-in: deploy the service workload into the resolved cluster (005).
+			// Local-run is unchanged when --deploy is absent (FR-010).
+			if deployFlag {
+				// Ensure the cluster for the workload (idempotent; the deps block
+				// above may have already ensured it).
+				if err := cluster.NewEnsurer(provider).EnsureCluster(context.Background(), target.Name); err != nil {
+					return err
+				}
+				if err := deployWorkload(res, target); err != nil {
+					return err
+				}
+			}
+
 			var reqs []daemon.RegisterRequest
 			for _, r := range routes {
 				req := daemon.RegisterRequest{
@@ -345,6 +359,7 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 	cmd.Flags().StringVarP(&file, "file", "f", "devedge.yaml", "project config file")
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "stay running and send lease heartbeats")
 	cmd.Flags().StringVar(&envOverride, "env", "", "environment override: dev|ci|ephemeral (default: auto-detect from CI)")
+	cmd.Flags().BoolVar(&deployFlag, "deploy", false, "also deploy the service workload into the resolved cluster (opt-in; default is local-run)")
 	return cmd
 }
 
@@ -394,6 +409,19 @@ func projectDownCmd() *cobra.Command {
 			}
 			if clean {
 				fmt.Printf("dropped dependency data for project %s\n", colorHost.Sprint(project))
+			}
+
+			// Remove a deployed workload, if any (005). Footprint-only and a no-op
+			// for never-deployed projects; best-effort so down still succeeds if the
+			// cluster is already gone.
+			if res != nil && project == res.Project() && workloadOf(res) != nil {
+				provider := defaultProvider()
+				target := cluster.Resolve(provider, cluster.DetectEnvironment(""), project, isDedicated(res))
+				if err := removeWorkload(res, target); err != nil {
+					fmt.Printf("%s could not remove workload for %s: %v\n", colorWarning.Sprint("warning:"), colorHost.Sprint(project), err)
+				} else {
+					fmt.Printf("removed workload for project %s\n", colorHost.Sprint(project))
+				}
 			}
 
 			// Destructive teardown of a DEDICATED cluster: the cluster is this
