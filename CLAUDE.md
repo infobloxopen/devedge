@@ -75,6 +75,8 @@ See `.claude/skills/README.md` for the template and conventions.
 - Shared Postgres/Redis in-cluster (Helm, PVC-backed); real-DSN files under `~/.devedge/`; no DB in devedge itself (003-dependency-runtime)
 - Go 1.23 (existing devedge module) + existing `internal/cluster` (k3d `Provider`, `Bootstrap`, `ValidateLocalCluster`, `PortForward`), `internal/helm` (`DefaultNamespace = "devedge-deps"`), `internal/depruntime` (`HelmProvisioner`, `Reconciler`), `internal/daemon` (HTTP API + `DepManager`), `internal/client`, `pkg/config` (`ServiceConfig`). External CLIs already required: `k3d`, `kubectl`, `helm`, container runtime (docker). (004-cluster-topology)
 - cluster state is k3d/Docker; per-service dependency data persists in PVCs (003, unchanged); a host-level lockfile under `~/.devedge/` guards concurrent cluster-ensure. (004-cluster-topology)
+- Go 1.23 (existing devedge module) + `internal/cluster` (004 — resolved `ClusterTarget` + `EnsureCluster`), (005-app-workload-deploy)
+- workload state is k8s (a Helm release per service); per-service dependency data persists in (005-app-workload-deploy)
 
 ## Cluster topology model (004-cluster-topology)
 
@@ -93,4 +95,5 @@ Cluster ensure logic (idempotent, host-`flock`, cert-manager bootstrap) lives in
 `internal/cluster/ensure.go`. Topology resolution is in `internal/cluster/topology.go`.
 
 ## Recent Changes
+- 005-app-workload-deploy: Added Go 1.23 (existing devedge module) + `internal/cluster` (004 — resolved `ClusterTarget` + `EnsureCluster`),
 - 001-fix-dns-udp-bind: Added Go 1.25.5 (from `go.mod`)
