@@ -18,12 +18,12 @@ func init() {
 // is set; this adds explicit checks for CI environments that may have a pseudo-TTY.
 func isCI() bool {
 	ciVars := []string{
-		"CI",                     // GitHub Actions, Travis, CircleCI, and most others
+		"CI", // GitHub Actions, Travis, CircleCI, and most others
 		"GITHUB_ACTIONS",
 		"JENKINS_HOME",
 		"JENKINS_URL",
 		"GITLAB_CI",
-		"TF_BUILD",               // Azure DevOps
+		"TF_BUILD", // Azure DevOps
 		"CIRCLECI",
 		"TRAVIS",
 		"BITBUCKET_BUILD_NUMBER",

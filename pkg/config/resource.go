@@ -59,6 +59,20 @@ type ClusterPreferrer interface {
 	ClusterDedicated() bool
 }
 
+// MigrationDeclarer is implemented by kinds whose dependencies declare schema migrations/seed.
+type MigrationDeclarer interface {
+	// Migrations resolves declared migration/seed sources against projectDir (the directory
+	// containing devedge.yaml), validating existence; one entry per declaring dependency.
+	Migrations(projectDir string) ([]DependencyMigrations, error)
+}
+
+// DependencyMigrations is the resolved migration/seed source for one dependency.
+type DependencyMigrations struct {
+	Dependency string // dependency name (postgres engine)
+	Dir        string // absolute migrations dir, "" if none declared
+	Seed       string // absolute seed path (file or dir), "" if none declared
+}
+
 // typeMeta is the apiVersion/kind envelope, decoded first to choose a kind
 // decoder without committing to a concrete type.
 type typeMeta struct {

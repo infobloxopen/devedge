@@ -35,6 +35,12 @@ type Dep struct {
 	Version   string
 	Port      int
 	Dedicated bool // FR-016: provision an isolated per-service instance, not the shared one
+	// Migrations is the absolute path to this dependency's migrations directory,
+	// resolved CLI-side from the project root; "" when none declared (006, postgres only).
+	Migrations string
+	// Seed is the absolute path to this dependency's dev seed file/dir; "" when none.
+	// Applied after migrations, local/dev only, skipped in CI (006/US3).
+	Seed string
 }
 
 // InstanceRef identifies which engine instance a dependency targets: the shared
@@ -88,6 +94,11 @@ type Provisioner interface {
 	// Secret in the cluster (reachable over the in-cluster Service DNS), so a
 	// deployed workload (005) can connect. Idempotent; unused by local-run.
 	EnsureConnSecret(ctx context.Context, b Binding) error
+	// EnsureMigrationStore materializes the binding's persisted down-migration store
+	// as an in-cluster PVC (006), so the deploy-mode migrate hook Job can keep applied
+	// up/down files across deploys — a rollback survives an image that no longer ships
+	// them (FR-012). Idempotent; unused by local-run (which uses a host directory).
+	EnsureMigrationStore(ctx context.Context, b Binding) error
 	// DropDatabase removes only this binding's isolation slice (never the instance).
 	DropDatabase(ctx context.Context, b Binding) error
 }

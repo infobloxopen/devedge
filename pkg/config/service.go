@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -80,6 +82,14 @@ type Dependency struct {
 	// attaching to the shared per-engine instance (FR-016, rare). Default false;
 	// only meaningful for a recognized engine.
 	Dedicated bool `yaml:"dedicated,omitempty"`
+	// Migrations is a project-relative path to the migrations directory
+	// (golang-migrate-style NNN_name.up.sql / .down.sql). Only valid for
+	// engine: postgres (FR-011). Optional.
+	Migrations string `yaml:"migrations,omitempty"`
+	// Seed is a project-relative path to a seed file or directory (plain SQL).
+	// Only valid for engine: postgres (FR-011). Optional; seed without migrations
+	// is allowed.
+	Seed string `yaml:"seed,omitempty"`
 }
 
 // ParseService strictly decodes a `kind: Service` document (unknown fields are
@@ -194,6 +204,10 @@ func (c *ServiceConfig) Validate() error {
 			return fmt.Errorf("service config: dependency %q has unrecognized engine %q (recognized engines: %s)",
 				d.Name, d.Engine, strings.Join(recognizedEngines, ", "))
 		}
+		if (d.Migrations != "" || d.Seed != "") && d.Engine != "postgres" {
+			return fmt.Errorf("service config: dependency %q declares migrations/seed but engine is %q (only postgres is supported)",
+				d.Name, d.Engine)
+		}
 		if d.Port < 1 || d.Port > 65535 {
 			return fmt.Errorf("service config: dependency %q has port %d out of range (must be 1-65535)", d.Name, d.Port)
 		}
@@ -251,4 +265,71 @@ func (d Dependency) DefaultedPort() int {
 		return d.Port
 	}
 	return enginePorts[d.Engine]
+}
+
+// resolveMigrationPath resolves a project-relative path against projectDir,
+// rejects paths that escape the project tree (relative segment starts with ".."),
+// and checks that the resolved path exists. Returns the absolute path or an error.
+func resolveMigrationPath(projectDir, rel, field, depName string) (string, error) {
+	abs := filepath.Join(projectDir, rel)
+	// Reject paths that escape projectDir.
+	relCheck, err := filepath.Rel(projectDir, abs)
+	if err != nil || strings.HasPrefix(relCheck, "..") {
+		return "", fmt.Errorf("service config: dependency %q %s path %q escapes the project directory",
+			depName, field, rel)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("service config: dependency %q %s path %q does not exist",
+				depName, field, rel)
+		}
+		return "", fmt.Errorf("service config: dependency %q %s path %q: %w", depName, field, rel, err)
+	}
+	return abs, nil
+}
+
+// Migrations resolves declared migration/seed sources against projectDir
+// (the directory containing devedge.yaml), validating existence; one entry per
+// declaring dependency. Satisfies MigrationDeclarer.
+func (c *ServiceConfig) Migrations(projectDir string) ([]DependencyMigrations, error) {
+	var results []DependencyMigrations
+	for _, d := range c.Spec.Dependencies {
+		if d.Migrations == "" && d.Seed == "" {
+			continue
+		}
+		dm := DependencyMigrations{Dependency: d.Name}
+
+		if d.Migrations != "" {
+			abs, err := resolveMigrationPath(projectDir, d.Migrations, "migrations", d.Name)
+			if err != nil {
+				return nil, err
+			}
+			info, err := os.Stat(abs)
+			if err != nil || !info.IsDir() {
+				return nil, fmt.Errorf("service config: dependency %q migrations path %q is not a directory",
+					d.Name, d.Migrations)
+			}
+			// Require at least one *.up.sql file.
+			matches, err := filepath.Glob(filepath.Join(abs, "*.up.sql"))
+			if err != nil {
+				return nil, fmt.Errorf("service config: dependency %q migrations glob: %w", d.Name, err)
+			}
+			if len(matches) == 0 {
+				return nil, fmt.Errorf("service config: dependency %q migrations dir %q is declared but empty (no *.up.sql files found)",
+					d.Name, d.Migrations)
+			}
+			dm.Dir = abs
+		}
+
+		if d.Seed != "" {
+			abs, err := resolveMigrationPath(projectDir, d.Seed, "seed", d.Name)
+			if err != nil {
+				return nil, err
+			}
+			dm.Seed = abs
+		}
+
+		results = append(results, dm)
+	}
+	return results, nil
 }

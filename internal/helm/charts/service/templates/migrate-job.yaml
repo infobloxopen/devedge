@@ -1,0 +1,51 @@
+{{- /*
+  Schema-migration hook Job (006). Rendered only when the service declares migrations
+  (.Values.migrations is set by the deploy path). Annotated as a pre-install/pre-upgrade
+  hook so Helm runs it to completion BEFORE the release's Deployment rolls (devedge installs
+  with `helm upgrade --install --wait`), guaranteeing the workload only ever serves against a
+  migrated schema (FR-003/FR-006-deploy).
+
+  It runs the SERVICE'S OWN image (contract C2: `<image> migrate up`), which converges the
+  database to the image's bundled schema version — up or down by the relative version. The
+  persisted down-store is a devedge-side-provisioned PVC mounted here, so a down step survives
+  even when this image no longer ships it (FR-012).
+*/ -}}
+{{- with .Values.migrations }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "service.name" $ }}-migrate
+  labels:
+    {{- include "service.labels" $ | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "service.name" $ }}-migrate
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: downstore
+          persistentVolumeClaim:
+            claimName: {{ .downStorePVC }}
+      containers:
+        - name: migrate
+          image: {{ $.Values.service.image | quote }}   # same image as the workload
+          args: ["migrate", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: dsn
+            - name: DEVEDGE_DOWNSTORE
+              value: {{ .downStorePath | quote }}
+          volumeMounts:
+            - name: downstore
+              mountPath: {{ .downStorePath }}
+{{- end }}

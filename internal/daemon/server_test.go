@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 )
 
@@ -25,7 +26,7 @@ func TestDepManager_emptyContextBackCompat(t *testing.T) {
 	mgr := NewDepManager(factory, t.TempDir(), 0, discardLogger())
 
 	results := mgr.Apply(context.Background(), "svc", Target{},
-		[]depruntime.Dep{{Name: "db", Engine: depruntime.EnginePostgres, Port: 5432}})
+		[]depruntime.Dep{{Name: "db", Engine: depruntime.EnginePostgres, Port: 5432}}, cluster.EnvDev)
 
 	if len(results) != 1 || !results[0].Ready() {
 		t.Fatalf("want 1 ready result, got %+v", results)
@@ -46,9 +47,9 @@ func TestDepManager_perContextProvisioner(t *testing.T) {
 	mgr := NewDepManager(factory, t.TempDir(), 0, discardLogger())
 	deps := []depruntime.Dep{{Name: "db", Engine: depruntime.EnginePostgres, Port: 5432}}
 
-	mgr.Apply(context.Background(), "a", Target{KubeContext: "k3d-devedge"}, deps)
-	mgr.Apply(context.Background(), "b", Target{KubeContext: "k3d-devedge"}, deps) // reuse
-	mgr.Apply(context.Background(), "c", Target{KubeContext: "k3d-other"}, deps)   // new
+	mgr.Apply(context.Background(), "a", Target{KubeContext: "k3d-devedge"}, deps, cluster.EnvDev)
+	mgr.Apply(context.Background(), "b", Target{KubeContext: "k3d-devedge"}, deps, cluster.EnvDev) // reuse
+	mgr.Apply(context.Background(), "c", Target{KubeContext: "k3d-other"}, deps, cluster.EnvDev)   // new
 
 	if built["k3d-devedge"] != 1 {
 		t.Errorf("shared context built %d times, want 1 (cached)", built["k3d-devedge"])
@@ -68,7 +69,7 @@ func TestDepManager_releaseUsesAppliedTarget(t *testing.T) {
 	mgr := NewDepManager(factory, t.TempDir(), 0, discardLogger())
 	deps := []depruntime.Dep{{Name: "db", Engine: depruntime.EnginePostgres, Port: 5432}}
 
-	mgr.Apply(context.Background(), "svc", Target{KubeContext: "k3d-devedge"}, deps)
+	mgr.Apply(context.Background(), "svc", Target{KubeContext: "k3d-devedge"}, deps, cluster.EnvDev)
 	if err := mgr.Release(context.Background(), "svc", true); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
@@ -90,8 +91,8 @@ func TestDepManager_toggleMigration(t *testing.T) {
 	mgr := NewDepManager(factory, t.TempDir(), 0, discardLogger())
 	deps := []depruntime.Dep{{Name: "db", Engine: depruntime.EnginePostgres, Port: 5432}}
 
-	mgr.Apply(context.Background(), "svc", Target{KubeContext: "k3d-devedge"}, deps)          // shared
-	mgr.Apply(context.Background(), "svc", Target{KubeContext: "k3d-devedge-proj-svc"}, deps) // toggled dedicated
+	mgr.Apply(context.Background(), "svc", Target{KubeContext: "k3d-devedge"}, deps, cluster.EnvDev)          // shared
+	mgr.Apply(context.Background(), "svc", Target{KubeContext: "k3d-devedge-proj-svc"}, deps, cluster.EnvDev) // toggled dedicated
 
 	if err := mgr.Release(context.Background(), "svc", true); err != nil {
 		t.Fatalf("Release: %v", err)
@@ -114,9 +115,10 @@ type recordingProv struct {
 func (p *recordingProv) EnsureInstance(_ context.Context, ref depruntime.InstanceRef) (depruntime.Instance, error) {
 	return depruntime.Instance{Engine: ref.Engine, Host: string(ref.Engine) + ".dev.test", Port: 5432}, nil
 }
-func (p *recordingProv) Ready(context.Context, depruntime.InstanceRef) error       { return nil }
-func (p *recordingProv) EnsureDatabase(context.Context, depruntime.Binding) error   { return nil }
-func (p *recordingProv) EnsureConnSecret(context.Context, depruntime.Binding) error { return nil }
+func (p *recordingProv) Ready(context.Context, depruntime.InstanceRef) error            { return nil }
+func (p *recordingProv) EnsureDatabase(context.Context, depruntime.Binding) error       { return nil }
+func (p *recordingProv) EnsureConnSecret(context.Context, depruntime.Binding) error     { return nil }
+func (p *recordingProv) EnsureMigrationStore(context.Context, depruntime.Binding) error { return nil }
 func (p *recordingProv) DropDatabase(context.Context, depruntime.Binding) error {
 	p.dropped[p.ctx] = true
 	return nil

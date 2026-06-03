@@ -213,6 +213,39 @@ func inClusterDSN(b Binding, namespace string) (string, error) {
 	})
 }
 
+// DownStorePVCName is the in-cluster PVC holding a binding's persisted
+// down-migration store (006), a sibling-named to the DSN Secret.
+func DownStorePVCName(service, dependency string) string {
+	return cluster.ProjectSlug(service) + "-" + dependency + "-downstore"
+}
+
+// EnsureMigrationStore creates (idempotently) the binding's persisted down-store PVC.
+func (p *HelmProvisioner) EnsureMigrationStore(ctx context.Context, b Binding) error {
+	name := DownStorePVCName(b.Service, b.Dependency)
+	manifest := fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 64Mi
+`, name, p.namespace)
+	return kubectlApplyStdin(ctx, p.kubeContext, manifest)
+}
+
+// kubectlDelete deletes a named resource in the provisioner's namespace, ignoring a
+// not-found result. Best-effort cleanup; errors are not surfaced.
+func (p *HelmProvisioner) kubectlDelete(ctx context.Context, kind, name string) {
+	args := []string{"delete", kind, name, "-n", p.namespace, "--ignore-not-found"}
+	if p.kubeContext != "" {
+		args = append([]string{"--context", p.kubeContext}, args...)
+	}
+	_ = exec.CommandContext(ctx, "kubectl", args...).Run()
+}
+
 // kubectlApplyStdin applies a manifest to the given context via stdin.
 func kubectlApplyStdin(ctx context.Context, kubeContext, manifest string) error {
 	args := []string{"apply", "-f", "-"}
@@ -222,7 +255,7 @@ func kubectlApplyStdin(ctx context.Context, kubeContext, manifest string) error 
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	cmd.Stdin = strings.NewReader(manifest)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("kubectl apply connection secret: %w: %s", err, out)
+		return fmt.Errorf("kubectl apply: %w: %s", err, out)
 	}
 	return nil
 }
@@ -235,6 +268,9 @@ func (p *HelmProvisioner) DropDatabase(ctx context.Context, b Binding) error {
 			return err
 		}
 		_, err := p.psql(ctx, target, "-c", fmt.Sprintf("DROP ROLE IF EXISTS %s", b.User))
+		// Best-effort: remove the deploy-mode down-store PVC (006 --clean). Only present
+		// when migrations were declared; --ignore-not-found makes this a no-op otherwise.
+		p.kubectlDelete(ctx, "pvc", DownStorePVCName(b.Service, b.Dependency))
 		return err
 	case EngineRedis:
 		_, _, target, _, _ := instanceFor(b.instanceRef())

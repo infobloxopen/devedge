@@ -23,11 +23,20 @@ type DepEnv struct {
 
 // Workload is the resolved deployable form of a service.
 type Workload struct {
-	Service  string // service name (slugged for cluster resources)
-	Port     int
-	Replicas int
-	Hostname string // dev hostname for the Ingress
-	Deps     []DepEnv
+	Service    string // service name (slugged for cluster resources)
+	Port       int
+	Replicas   int
+	Hostname   string // dev hostname for the Ingress
+	Deps       []DepEnv
+	Migrations *MigrationDeploy // set when a dependency declares schema migrations (006); nil otherwise
+}
+
+// MigrationDeploy wires the deploy-mode schema-migration hook Job (006): the per-dependency
+// in-cluster DSN Secret the hook reads, and the persisted down-store PVC it mounts.
+type MigrationDeploy struct {
+	SecretName    string // <release>-<dep>-dsn (in-cluster DSN, key "dsn")
+	DownStorePVC  string // <release>-<dep>-downstore (devedge side-provisioned)
+	DownStorePath string // mount path, exported to the migrate command as DEVEDGE_DOWNSTORE
 }
 
 // ImageSource is where the workload image comes from: a pre-built reference, or a
@@ -100,7 +109,7 @@ func (d *Deployer) Deploy(ctx context.Context, w Workload, src ImageSource) (Sta
 		return Status{}, fmt.Errorf("resolve image: %w", err)
 	}
 	d.log().Info("deploying workload", "service", w.Service, "release", release, "image", image, "cluster", d.ClusterName)
-	values := chartValues(release, image, w.Port, w.Replicas, w.Hostname, w.Deps)
+	values := chartValues(release, image, w.Port, w.Replicas, w.Hostname, w.Deps, w.Migrations)
 	if err := d.Helm.Install(ctx, helm.ChartService, release, d.Namespace, values); err != nil {
 		return Status{}, fmt.Errorf("deploy workload %q: %w", w.Service, err)
 	}
@@ -115,7 +124,7 @@ func (d *Deployer) Remove(ctx context.Context, service string) error {
 }
 
 // chartValues builds the service-chart values (contracts/cli-and-chart.md).
-func chartValues(name, image string, port, replicas int, hostname string, deps []DepEnv) map[string]any {
+func chartValues(name, image string, port, replicas int, hostname string, deps []DepEnv, mig *MigrationDeploy) map[string]any {
 	dv := make([]map[string]any, 0, len(deps))
 	for _, d := range deps {
 		dv = append(dv, map[string]any{
@@ -125,7 +134,7 @@ func chartValues(name, image string, port, replicas int, hostname string, deps [
 			"envVar":  d.EnvVar,
 		})
 	}
-	return map[string]any{
+	v := map[string]any{
 		"service": map[string]any{
 			"name":     name,
 			"image":    image,
@@ -138,6 +147,16 @@ func chartValues(name, image string, port, replicas int, hostname string, deps [
 		},
 		"dependencies": dv,
 	}
+	// Render the pre-install/pre-upgrade schema-migration hook Job only when a
+	// dependency declares migrations (006); absent → templates/migrate-job.yaml is empty.
+	if mig != nil {
+		v["migrations"] = map[string]any{
+			"secretName":    mig.SecretName,
+			"downStorePVC":  mig.DownStorePVC,
+			"downStorePath": mig.DownStorePath,
+		}
+	}
+	return v
 }
 
 func effectiveReplicas(r int) int {

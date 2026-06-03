@@ -11,9 +11,9 @@ import (
 type fakeProvisioner struct {
 	mu sync.Mutex
 
-	instances map[Engine]int  // EnsureInstance call count per engine
-	databases map[string]int  // EnsureDatabase call count per binding key
-	dropped   map[string]int  // DropDatabase call count per binding key
+	instances  map[Engine]int // EnsureInstance call count per engine
+	databases  map[string]int // EnsureDatabase call count per binding key
+	dropped    map[string]int // DropDatabase call count per binding key
 	readyAfter map[Engine]int // becomes ready after N Ready() calls
 	readyCalls map[Engine]int
 
@@ -69,7 +69,8 @@ func (f *fakeProvisioner) EnsureDatabase(_ context.Context, b Binding) error {
 	return nil
 }
 
-func (f *fakeProvisioner) EnsureConnSecret(context.Context, Binding) error { return nil }
+func (f *fakeProvisioner) EnsureConnSecret(context.Context, Binding) error     { return nil }
+func (f *fakeProvisioner) EnsureMigrationStore(context.Context, Binding) error { return nil }
 
 func (f *fakeProvisioner) DropDatabase(_ context.Context, b Binding) error {
 	f.mu.Lock()

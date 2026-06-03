@@ -497,6 +497,61 @@ unchanged.
 
 See [`specs/005-app-workload-deploy/`](specs/005-app-workload-deploy/) for the full design.
 
+#### Schema migrations and dev seed
+
+A `postgres` dependency can declare versioned schema migrations and optional dev seed data. Add
+`migrations` and/or `seed` to the dependency block in your `kind: Service` config:
+
+```yaml
+dependencies:
+  - name: db
+    engine: postgres
+    migrations: db/migrations     # dir of NNN_name.up.sql / NNN_name.down.sql (golang-migrate style)
+    seed: db/seed/dev.sql         # optional SQL file or dir; dev-only
+```
+
+Both fields are optional and accepted **only on `engine: postgres`** — declaring them on any other
+engine is a parse/validate error. Paths resolve under the project root and must exist; the
+migrations directory must contain at least one `*.up.sql`. `seed` without `migrations` is allowed.
+
+**`de project up`**: when a dependency declares migrations, devedge brings its isolated database to
+the declared schema version **before** the dependency is marked ready and before the workload
+serves — in both local-run and `--deploy` modes. The migrate step targets a version (the highest
+migration in the source or image) and migrates **up or down** to reach it, so deploying an older
+image automatically rolls the schema back with no separate rollback command. Applied down steps are
+persisted to a store (a host directory in local-run mode; a per-service PVC in deploy mode) so a
+rollback works even when the current image no longer ships those `.down.sql` files. The step is
+fully idempotent and reports the outcome:
+
+```
+✔ db: migrations applied 2 (v0 → v2)
+✔ db: seed seeded
+```
+
+Re-running with no new migrations reports `already current` / `already seeded` and makes no
+changes. In CI (`de ci run`), seed is skipped; schema migrations still run.
+
+**Failure recovery**: if a migration fails, `up` stops with an actionable error and the workload
+does not serve against a partial schema. A corrected re-run auto-recovers the dirty state. For a
+botched migration where the SQL itself was wrong, the reliable fix is `de project down --clean`
+followed by `de project up` (rebuilds the corrected schema from scratch).
+
+**`de project down` / `--clean`**: plain `down` preserves the schema and data. `--clean` removes
+the schema, seed marker, and the persisted down-migration store in addition to the dependency data,
+so the next `up` rebuilds everything from scratch.
+
+**Deploy-mode `migrate` subcommand contract**: when `--deploy` is used with declared migrations,
+devedge renders a Helm `pre-install`/`pre-upgrade` hook Job that runs the **service's own image**
+as `<image> migrate up` before the Deployment rolls. Images must provide a `migrate` subcommand
+that reads `DATABASE_URL` (from the per-dep DSN Secret) and `DEVEDGE_DOWNSTORE` (the persisted
+down-store path), converges the bundled migrations to their target version, and exits non-zero on
+failure. If the image does not provide this subcommand, `de project up --deploy` fails with an
+actionable error.
+
+See [`specs/006-storage-migrations-seed/`](specs/006-storage-migrations-seed/) for the full design
+and [`specs/006-storage-migrations-seed/contracts/migrations-contract.md`](specs/006-storage-migrations-seed/contracts/migrations-contract.md)
+for the service-image subcommand contract.
+
 ## Development
 
 ```bash

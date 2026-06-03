@@ -7,7 +7,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/dsn"
+	"github.com/infobloxopen/devedge/internal/migrate"
 )
 
 // State is a binding's reconcile state (data-model.md).
@@ -31,6 +33,28 @@ type Result struct {
 	EnvVarValue string `json:"env_var_value,omitempty"` // indirect fsnotify DSN; "" until Ready
 	DSNFilePath string `json:"dsn_file_path,omitempty"`
 	Err         string `json:"error,omitempty"` // actionable, per-dependency; "" on success
+	// Migration reports the schema-migration outcome when the dependency declared
+	// migrations (006/FR-010); nil when none declared. Carries no credentials.
+	Migration *MigrationOutcome `json:"migration,omitempty"`
+	// Seed reports the dev-seed outcome when the dependency declared a seed (006/US3);
+	// nil when none declared.
+	Seed *SeedOutcome `json:"seed,omitempty"`
+}
+
+// MigrationOutcome is the observable result of applying a dependency's schema
+// migrations during reconcile (FR-010).
+type MigrationOutcome struct {
+	FromVersion    uint `json:"from_version"`
+	ToVersion      uint `json:"to_version"`
+	Applied        int  `json:"applied"`
+	AlreadyCurrent bool `json:"already_current"`
+}
+
+// SeedOutcome is the observable result of the dev-seed step (006/US3/FR-010); nil on a
+// Result when the dependency declared no seed.
+type SeedOutcome struct {
+	Applied   bool `json:"applied"`    // true = seed ran this up; false = already seeded
+	SkippedCI bool `json:"skipped_ci"` // true = not run because the environment is ephemeral/CI (FR-013)
 }
 
 // Ready reports whether the dependency reached the Ready state.
@@ -40,22 +64,32 @@ func (r Result) Ready() bool { return r.State == StateReady }
 // isolated backing stores via a Provisioner.
 type Reconciler struct {
 	prov             Provisioner
-	baseDir          string        // DSN-file base (e.g. ~/.devedge)
-	readinessTimeout time.Duration // bounded wait per dependency (FR-004)
+	baseDir          string          // DSN-file base (e.g. ~/.devedge)
+	readinessTimeout time.Duration   // bounded wait per dependency (FR-004)
+	applier          migrate.Applier // schema-migration engine (006); fork-backed by default
+	migrateTimeout   time.Duration   // bounded per-dependency migrate timeout (R10/G2)
 }
 
-// NewReconciler builds a Reconciler. A zero timeout defaults to 60s.
+// NewReconciler builds a Reconciler. A zero timeout defaults to 60s. The schema
+// applier defaults to the fork-backed engine; the migrate step is skipped entirely
+// for dependencies that declare no migrations, so this is inert for non-006 use.
 func NewReconciler(prov Provisioner, baseDir string, readinessTimeout time.Duration) *Reconciler {
 	if readinessTimeout <= 0 {
 		readinessTimeout = 60 * time.Second
 	}
-	return &Reconciler{prov: prov, baseDir: baseDir, readinessTimeout: readinessTimeout}
+	return &Reconciler{
+		prov:             prov,
+		baseDir:          baseDir,
+		readinessTimeout: readinessTimeout,
+		applier:          migrate.NewForkApplier(),
+		migrateTimeout:   2 * time.Minute,
+	}
 }
 
 // Reconcile drives each declared dependency to Ready, idempotently. Failures are
 // per-dependency and leave no half-provisioned residue that blocks a retry
 // (FR-008/FR-009). It returns one Result per dependency, in input order.
-func (r *Reconciler) Reconcile(ctx context.Context, service string, deps []Dep) []Result {
+func (r *Reconciler) Reconcile(ctx context.Context, service string, deps []Dep, env cluster.Environment) []Result {
 	engineCount := map[Engine]int{}
 	for _, d := range deps {
 		engineCount[d.Engine]++
@@ -65,12 +99,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, service string, deps []Dep) 
 	for _, d := range deps {
 		ambiguous := engineCount[d.Engine] > 1
 		res := Result{Name: d.Name, Engine: d.Engine, State: StatePending, EnvVarName: EnvVarName(d.Engine, d.Name, ambiguous)}
-		results = append(results, r.reconcileOne(ctx, service, d, res))
+		results = append(results, r.reconcileOne(ctx, service, d, res, env))
 	}
 	return results
 }
 
-func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, res Result) Result {
+func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, res Result, env cluster.Environment) Result {
 	fail := func(err error) Result {
 		res.State = StateFailed
 		res.Err = err.Error()
@@ -104,6 +138,15 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 	if err := r.prov.EnsureConnSecret(ctx, binding); err != nil {
 		return fail(fmt.Errorf("dependency %q: emit in-cluster connection: %w", d.Name, err))
 	}
+	// Provision the deploy-mode persisted down-store PVC when this dependency declares
+	// migrations (006). Local-run uses a host dir, but the in-cluster store is created here
+	// alongside the connection Secret so the deploy hook Job can mount it (it persists
+	// across deploys for FR-012; --clean removes it).
+	if d.Migrations != "" {
+		if err := r.prov.EnsureMigrationStore(ctx, binding); err != nil {
+			return fail(fmt.Errorf("dependency %q: ensure migration store: %w", d.Name, err))
+		}
+	}
 	res.State = StateProvisioned
 
 	port := inst.Port
@@ -117,6 +160,32 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 	if err != nil {
 		return fail(fmt.Errorf("dependency %q: %w", d.Name, err))
 	}
+	// Bring the schema to the declared version before the DSN/env-var is emitted
+	// (006/FR-006-local/A1): a developer's app only ever hotloads a ready schema. A
+	// failure holds the dependency out of Ready (no DSN file is written) and aborts
+	// up with an actionable error; the next corrected run auto-recovers (FR-007).
+	if d.Migrations != "" {
+		outcome, err := r.applyMigrations(ctx, service, d, realDSN)
+		if err != nil {
+			return fail(fmt.Errorf("dependency %q: %w", d.Name, err))
+		}
+		res.Migration = outcome
+	}
+
+	// Apply dev seed once (after migrations), local/dev only — never in CI/ephemeral
+	// (006/US3/FR-013). A failure holds the dependency out of Ready like a migration.
+	if d.Seed != "" {
+		if env == cluster.EnvEphemeral {
+			res.Seed = &SeedOutcome{SkippedCI: true}
+		} else {
+			seeded, err := r.applier.Seed(ctx, realDSN, migrate.Source{Path: d.Seed})
+			if err != nil {
+				return fail(fmt.Errorf("dependency %q: apply seed: %w", d.Name, err))
+			}
+			res.Seed = &SeedOutcome{Applied: seeded}
+		}
+	}
+
 	path := dsn.FilePath(r.baseDir, service, d.Name)
 	if err := dsn.WriteDSNFile(path, realDSN); err != nil {
 		return fail(fmt.Errorf("dependency %q: write DSN file: %w", d.Name, err))
@@ -128,6 +197,30 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 	return res
 }
 
+// applyMigrations brings d's database (reachable at realDSN over the supervised
+// port-forward) to the latest declared migration. It persists applied up/down files
+// to the host down-store so a rollback survives the source tree changing (FR-012)
+// and a dirty database auto-recovers on a corrected re-run (FR-007). The step is
+// bounded by migrateTimeout with a clear error on exceed (R10/G2).
+func (r *Reconciler) applyMigrations(ctx context.Context, service string, d Dep, realDSN string) (*MigrationOutcome, error) {
+	store := migrate.DownStore{Dir: dsn.DownStoreDir(r.baseDir, service, d.Name)}
+	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("prepare down-store: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, r.migrateTimeout)
+	defer cancel()
+	out, err := r.applier.Migrate(ctx, realDSN, migrate.Source{Path: d.Migrations}, store)
+	if err != nil {
+		return nil, fmt.Errorf("apply migrations: %w", err)
+	}
+	return &MigrationOutcome{
+		FromVersion:    out.FromVersion,
+		ToVersion:      out.ToVersion,
+		Applied:        out.Applied,
+		AlreadyCurrent: out.AlreadyCurrent,
+	}, nil
+}
+
 // Release tears down a service's dependencies: it removes each DSN file and,
 // when clean is set, drops only that service's isolation slice (never the shared
 // instance). Default (clean=false) is non-destructive — data persists (FR-005/7).
@@ -136,6 +229,9 @@ func (r *Reconciler) Release(ctx context.Context, service string, deps []Dep, cl
 	for _, d := range deps {
 		_ = os.Remove(dsn.FilePath(r.baseDir, service, d.Name))
 		if clean {
+			// Reset the persisted down-migration store alongside the data drop so the
+			// next up repopulates it from the current source (006/T011/FR-008).
+			_ = os.RemoveAll(dsn.DownStoreDir(r.baseDir, service, d.Name))
 			if err := r.prov.DropDatabase(ctx, IdentityBinding(service, d)); err != nil {
 				errs = append(errs, fmt.Errorf("drop %s/%s: %w", service, d.Name, err))
 			}
