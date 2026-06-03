@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/dsn"
 	"github.com/infobloxopen/devedge/internal/migrate"
 )
@@ -35,6 +36,9 @@ type Result struct {
 	// Migration reports the schema-migration outcome when the dependency declared
 	// migrations (006/FR-010); nil when none declared. Carries no credentials.
 	Migration *MigrationOutcome `json:"migration,omitempty"`
+	// Seed reports the dev-seed outcome when the dependency declared a seed (006/US3);
+	// nil when none declared.
+	Seed *SeedOutcome `json:"seed,omitempty"`
 }
 
 // MigrationOutcome is the observable result of applying a dependency's schema
@@ -44,6 +48,13 @@ type MigrationOutcome struct {
 	ToVersion      uint `json:"to_version"`
 	Applied        int  `json:"applied"`
 	AlreadyCurrent bool `json:"already_current"`
+}
+
+// SeedOutcome is the observable result of the dev-seed step (006/US3/FR-010); nil on a
+// Result when the dependency declared no seed.
+type SeedOutcome struct {
+	Applied   bool `json:"applied"`    // true = seed ran this up; false = already seeded
+	SkippedCI bool `json:"skipped_ci"` // true = not run because the environment is ephemeral/CI (FR-013)
 }
 
 // Ready reports whether the dependency reached the Ready state.
@@ -78,7 +89,7 @@ func NewReconciler(prov Provisioner, baseDir string, readinessTimeout time.Durat
 // Reconcile drives each declared dependency to Ready, idempotently. Failures are
 // per-dependency and leave no half-provisioned residue that blocks a retry
 // (FR-008/FR-009). It returns one Result per dependency, in input order.
-func (r *Reconciler) Reconcile(ctx context.Context, service string, deps []Dep) []Result {
+func (r *Reconciler) Reconcile(ctx context.Context, service string, deps []Dep, env cluster.Environment) []Result {
 	engineCount := map[Engine]int{}
 	for _, d := range deps {
 		engineCount[d.Engine]++
@@ -88,12 +99,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, service string, deps []Dep) 
 	for _, d := range deps {
 		ambiguous := engineCount[d.Engine] > 1
 		res := Result{Name: d.Name, Engine: d.Engine, State: StatePending, EnvVarName: EnvVarName(d.Engine, d.Name, ambiguous)}
-		results = append(results, r.reconcileOne(ctx, service, d, res))
+		results = append(results, r.reconcileOne(ctx, service, d, res, env))
 	}
 	return results
 }
 
-func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, res Result) Result {
+func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, res Result, env cluster.Environment) Result {
 	fail := func(err error) Result {
 		res.State = StateFailed
 		res.Err = err.Error()
@@ -159,6 +170,20 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 			return fail(fmt.Errorf("dependency %q: %w", d.Name, err))
 		}
 		res.Migration = outcome
+	}
+
+	// Apply dev seed once (after migrations), local/dev only — never in CI/ephemeral
+	// (006/US3/FR-013). A failure holds the dependency out of Ready like a migration.
+	if d.Seed != "" {
+		if env == cluster.EnvEphemeral {
+			res.Seed = &SeedOutcome{SkippedCI: true}
+		} else {
+			seeded, err := r.applier.Seed(ctx, realDSN, migrate.Source{Path: d.Seed})
+			if err != nil {
+				return fail(fmt.Errorf("dependency %q: apply seed: %w", d.Name, err))
+			}
+			res.Seed = &SeedOutcome{Applied: seeded}
+		}
 	}
 
 	path := dsn.FilePath(r.baseDir, service, d.Name)

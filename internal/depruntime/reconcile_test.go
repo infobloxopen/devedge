@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/infobloxopen/devedge/internal/cluster"
 )
 
 func pgDep() Dep    { return Dep{Name: "db", Engine: EnginePostgres, Version: "16", Port: 5432} }
@@ -16,7 +18,7 @@ func TestReconcile_drivesToReady(t *testing.T) {
 	fake := newFake()
 	r := NewReconciler(fake, t.TempDir(), time.Second)
 
-	res := r.Reconcile(context.Background(), "webhooks", []Dep{pgDep()})
+	res := r.Reconcile(context.Background(), "webhooks", []Dep{pgDep()}, cluster.EnvDev)
 	if len(res) != 1 || !res[0].Ready() {
 		t.Fatalf("want 1 Ready result, got %+v", res)
 	}
@@ -46,8 +48,8 @@ func TestReconcile_idempotent(t *testing.T) {
 	r := NewReconciler(fake, t.TempDir(), time.Second)
 	deps := []Dep{pgDep()}
 
-	r.Reconcile(context.Background(), "webhooks", deps)
-	r.Reconcile(context.Background(), "webhooks", deps)
+	r.Reconcile(context.Background(), "webhooks", deps, cluster.EnvDev)
+	r.Reconcile(context.Background(), "webhooks", deps, cluster.EnvDev)
 
 	if fake.instances[EnginePostgres] != 2 {
 		// EnsureInstance is called each pass but is itself idempotent (helm upgrade --install);
@@ -65,7 +67,7 @@ func TestReconcile_readinessTimeout(t *testing.T) {
 	fake.neverReady[EnginePostgres] = true
 	r := NewReconciler(fake, t.TempDir(), 150*time.Millisecond)
 
-	res := r.Reconcile(context.Background(), "webhooks", []Dep{pgDep()})
+	res := r.Reconcile(context.Background(), "webhooks", []Dep{pgDep()}, cluster.EnvDev)
 	if res[0].State != StateFailed {
 		t.Fatalf("want Failed, got %s", res[0].State)
 	}
@@ -85,7 +87,7 @@ func TestReconcile_readinessTimeout(t *testing.T) {
 // T034: a recognized-but-unrunnable engine fails by name (FR-012).
 func TestReconcile_unsupportedEngine(t *testing.T) {
 	r := NewReconciler(newFake(), t.TempDir(), time.Second)
-	res := r.Reconcile(context.Background(), "svc", []Dep{{Name: "x", Engine: Engine("mysql"), Port: 3306}})
+	res := r.Reconcile(context.Background(), "svc", []Dep{{Name: "x", Engine: Engine("mysql"), Port: 3306}}, cluster.EnvDev)
 	if res[0].State != StateFailed || !strings.Contains(res[0].Err, "mysql") {
 		t.Fatalf("want failure naming the engine, got %+v", res[0])
 	}
@@ -112,7 +114,7 @@ func TestDerivation_deterministicAndIsolated(t *testing.T) {
 // uniform fsnotify DSN convention (real Redis provisioning lands in Slice B).
 func TestReconcile_redisToReady(t *testing.T) {
 	r := NewReconciler(newFake(), t.TempDir(), time.Second)
-	res := r.Reconcile(context.Background(), "webhooks", []Dep{redisDep()})
+	res := r.Reconcile(context.Background(), "webhooks", []Dep{redisDep()}, cluster.EnvDev)
 	if !res[0].Ready() {
 		t.Fatalf("redis dep not Ready: %+v", res[0])
 	}

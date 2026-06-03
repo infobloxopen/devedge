@@ -21,8 +21,8 @@ type apiFakeProv struct{}
 func (apiFakeProv) EnsureInstance(_ context.Context, ref depruntime.InstanceRef) (depruntime.Instance, error) {
 	return depruntime.Instance{Engine: ref.Engine, Host: string(ref.Engine) + ".dev.test", Port: 5432}, nil
 }
-func (apiFakeProv) Ready(context.Context, depruntime.InstanceRef) error       { return nil }
-func (apiFakeProv) EnsureDatabase(context.Context, depruntime.Binding) error   { return nil }
+func (apiFakeProv) Ready(context.Context, depruntime.InstanceRef) error            { return nil }
+func (apiFakeProv) EnsureDatabase(context.Context, depruntime.Binding) error       { return nil }
 func (apiFakeProv) EnsureConnSecret(context.Context, depruntime.Binding) error     { return nil }
 func (apiFakeProv) EnsureMigrationStore(context.Context, depruntime.Binding) error { return nil }
 func (apiFakeProv) DropDatabase(context.Context, depruntime.Binding) error         { return nil }

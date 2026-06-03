@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/helm"
 )
@@ -46,8 +47,8 @@ type DepManager struct {
 	factory ProvisionerFactory
 	baseDir string
 	timeout time.Duration
-	recs    map[string]*depruntime.Reconciler  // per-target reconciler (cached)
-	provs   map[string]depruntime.Provisioner  // per-target provisioner (for Close)
+	recs    map[string]*depruntime.Reconciler // per-target reconciler (cached)
+	provs   map[string]depruntime.Provisioner // per-target provisioner (for Close)
 	records map[string]depRecord
 	logger  *slog.Logger
 }
@@ -92,7 +93,7 @@ func (m *DepManager) reconcilerFor(t Target) *depruntime.Reconciler {
 // Apply reconciles a service's declared dependencies to their desired state on the
 // resolved target and stores the results. Idempotent (FR-008). Emits structured
 // logs per dependency (Principle V observability).
-func (m *DepManager) Apply(ctx context.Context, service string, target Target, deps []depruntime.Dep) []depruntime.Result {
+func (m *DepManager) Apply(ctx context.Context, service string, target Target, deps []depruntime.Dep, env cluster.Environment) []depruntime.Result {
 	// Toggle migration (FR-015): if this service was last provisioned on a
 	// different target (e.g. it just opted into a dedicated cluster), release its
 	// footprint on the prior cluster first so it is never running in two places,
@@ -111,7 +112,7 @@ func (m *DepManager) Apply(ctx context.Context, service string, target Target, d
 	}
 
 	rec := m.reconcilerFor(target)
-	results := rec.Reconcile(ctx, service, deps)
+	results := rec.Reconcile(ctx, service, deps, env)
 
 	m.mu.Lock()
 	m.records[service] = depRecord{deps: deps, target: target, results: results}
@@ -123,6 +124,10 @@ func (m *DepManager) Apply(ctx context.Context, service string, target Target, d
 			if mo := r.Migration; mo != nil {
 				m.logger.Info("schema migrated", "service", service, "dependency", r.Name,
 					"applied", mo.Applied, "version", mo.ToVersion, "alreadyCurrent", mo.AlreadyCurrent)
+			}
+			if so := r.Seed; so != nil {
+				m.logger.Info("dev seed", "service", service, "dependency", r.Name,
+					"applied", so.Applied, "skippedCI", so.SkippedCI)
 			}
 		} else {
 			m.logger.Warn("dependency not ready", "service", service, "dependency", r.Name, "state", r.State, "error", r.Err, "context", target.KubeContext)

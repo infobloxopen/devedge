@@ -100,13 +100,6 @@ func (a *ForkApplier) Migrate(ctx context.Context, dsn string, src Source, store
 	return Result{FromVersion: from, ToVersion: to, Applied: applied}, nil
 }
 
-// Seed is implemented in US3 (T018, internal/migrate/seed.go): apply-once dev seed keyed by
-// the devedge_seed marker, skipped in CI. It is defined here only so *ForkApplier satisfies
-// the Applier seam for US1 interface wiring; US1 never calls Seed (seed runs in the US3 path).
-func (a *ForkApplier) Seed(_ context.Context, _ string, _ Source) (bool, error) {
-	return false, errors.New("seed: not implemented until US3 (T018)")
-}
-
 // runBounded runs the migrate operation under a bounded deadline. If ctx has no deadline,
 // defaultMigrateTimeout applies. On timeout it asks the engine to stop after the current
 // migration (GracefulStop) and waits for it to unwind so the database lock is released,

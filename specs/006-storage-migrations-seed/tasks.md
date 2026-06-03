@@ -97,9 +97,9 @@ Job, in-cluster networking), so e2e coverage is central.
 
 **Independent Test**: declare migrations + seed; `up` → seeded rows present after migrations; re-`up` → no duplicate/error; `down --clean` then `up` → re-seeded; `de ci run -- de project up` → schema applied, seed skipped.
 
-- [ ] T017 [C] [US3] e2e (k3d) in `test/e2e/migrations_seed_test.go`: declare migrations + seed; local `up` → seeded rows present after migration; re-`up` → no duplicate/error (SC-005 seed part); `down --clean` then `up` → re-seeded; `de ci run -- de project up` on the ephemeral cluster → schema applied, **seed skipped** (FR-013) — must fail first.
-- [ ] T018 [C] [US3] Implement seed apply-once in `internal/migrate/seed.go` + the reconcile wiring: **(replace the deferred `ForkApplier.Seed` stub in `migrate_fork.go` from T007 — do not add a second `Seed` method.)** after a successful migrate, apply the seed and record it via the `devedge_seed` marker table; skip when the marker exists; skip entirely when the resolved environment is ephemeral/CI (`cluster.DetectEnvironment`, FR-013); reset on `--clean` (DB drop removes the marker) — depends on T009, T007.
-- [ ] T019 [S] [US3] Report the seed outcome ("seeded" / "already seeded" / "skipped (CI)") on `up` (FR-010) in `cmd/de/` + `internal/daemon/` — depends on T018.
+- [X] T017 [C] [US3] e2e (k3d) in `test/e2e/migrations_seed_test.go`: declare migrations + seed; local `up` → seeded rows present after migration; re-`up` → no duplicate/error (SC-005 seed part); `down --clean` then `up` → re-seeded; `de ci run -- de project up` on the ephemeral cluster → schema applied, **seed skipped** (FR-013) — must fail first.
+- [X] T018 [C] [US3] Implement seed apply-once in `internal/migrate/seed.go` + the reconcile wiring: **(replace the deferred `ForkApplier.Seed` stub in `migrate_fork.go` from T007 — do not add a second `Seed` method.)** after a successful migrate, apply the seed and record it via the `devedge_seed` marker table; skip when the marker exists; skip entirely when the resolved environment is ephemeral/CI (`cluster.DetectEnvironment`, FR-013); reset on `--clean` (DB drop removes the marker) — depends on T009, T007.
+- [X] T019 [S] [US3] Report the seed outcome ("seeded" / "already seeded" / "skipped (CI)") on `up` (FR-010) in `cmd/de/` + `internal/daemon/` — depends on T018.
 
 **Checkpoint**: seed applies once locally, is reset by `--clean`, and never runs in CI.
 

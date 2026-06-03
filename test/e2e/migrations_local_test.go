@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 )
 
@@ -54,7 +55,7 @@ func reconcileDB(ctx context.Context, rec *depruntime.Reconciler, service, migra
 	deps := []depruntime.Dep{{
 		Name: "db", Engine: depruntime.EnginePostgres, Port: 5432, Migrations: migrationsDir,
 	}}
-	return rec.Reconcile(ctx, service, deps)[0]
+	return rec.Reconcile(ctx, service, deps, cluster.EnvDev)[0]
 }
 
 // TestMigrationsLocal_e2e: declared migrations bring a service's isolated DB to the

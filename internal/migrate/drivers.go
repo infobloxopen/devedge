@@ -18,4 +18,7 @@ import (
 	// Source drivers: local migration files (local-run) and embedded io/fs trees.
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/golang-migrate/migrate/v4/source/iofs"
+	// "postgres" database/sql driver, used by seed.go to run dev seed SQL and manage the
+	// devedge_seed marker table. (The fork's pgx5 driver also uses lib/pq under the hood.)
+	_ "github.com/lib/pq"
 )

@@ -15,7 +15,7 @@ import (
 // env var + DSN file per dependency. Per-dependency failures are surfaced and
 // cause a non-zero exit, but the daemon leaves nothing half-provisioned that
 // blocks a retry (FR-009).
-func provisionDependencies(c *client.Client, service string, deps []config.Dependency, migs []config.DependencyMigrations, target cluster.ClusterTarget) error {
+func provisionDependencies(c *client.Client, service string, deps []config.Dependency, migs []config.DependencyMigrations, env cluster.Environment, target cluster.ClusterTarget) error {
 	if err := requireDependencyTools(); err != nil {
 		return err
 	}
@@ -45,6 +45,7 @@ func provisionDependencies(c *client.Client, service string, deps []config.Depen
 	results, err := c.ApplyDependencies(context.Background(), service, daemon.ApplyRequest{
 		KubeContext:  target.KubeContext,
 		Namespace:    target.Namespace,
+		Environment:  string(env),
 		Dependencies: reqs,
 	})
 	if err != nil {
@@ -66,6 +67,17 @@ func provisionDependencies(c *client.Client, service string, deps []config.Depen
 					fmt.Printf("  migrations: rolled back (v%d → v%d)\n", m.FromVersion, m.ToVersion)
 				default:
 					fmt.Printf("  migrations: applied %d (v%d → v%d)\n", m.Applied, m.FromVersion, m.ToVersion)
+				}
+			}
+			// Report the dev-seed outcome when a seed was declared (FR-010/FR-013).
+			if s := r.Seed; s != nil {
+				switch {
+				case s.SkippedCI:
+					fmt.Printf("  seed: skipped (CI)\n")
+				case s.Applied:
+					fmt.Printf("  seed: seeded\n")
+				default:
+					fmt.Printf("  seed: already seeded\n")
 				}
 			}
 		} else {

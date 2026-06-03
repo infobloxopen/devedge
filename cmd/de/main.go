@@ -305,7 +305,7 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 					}
 					migs = m
 				}
-				if err := provisionDependencies(c, res.Project(), dd.Dependencies(), migs, target); err != nil {
+				if err := provisionDependencies(c, res.Project(), dd.Dependencies(), migs, env, target); err != nil {
 					return err
 				}
 			}

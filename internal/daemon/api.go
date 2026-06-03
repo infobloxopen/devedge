@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/pkg/types"
@@ -56,8 +57,12 @@ type DependencyRequest struct {
 // the resolved cluster target they should be provisioned against (004). An empty
 // KubeContext preserves the pre-topology behavior (current kube context).
 type ApplyRequest struct {
-	KubeContext  string              `json:"kubeContext,omitempty"`
-	Namespace    string              `json:"namespace,omitempty"`
+	KubeContext string `json:"kubeContext,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+	// Environment is the CLI-resolved operating mode ("dev"/"ephemeral"); it gates the dev
+	// seed step (skipped in ephemeral/CI, FR-013). Empty defaults to dev. The daemon cannot
+	// detect CI itself (DEVEDGE_ENV lives in the `de` process), so the CLI passes it.
+	Environment  string              `json:"environment,omitempty"`
 	Dependencies []DependencyRequest `json:"dependencies"`
 }
 
@@ -76,7 +81,11 @@ func (a *API) applyDependencies(w http.ResponseWriter, r *http.Request) {
 		deps[i] = depruntime.Dep{Name: q.Name, Engine: depruntime.Engine(q.Engine), Version: q.Version, Port: q.Port, Dedicated: q.Dedicated, Migrations: q.Migrations, Seed: q.Seed}
 	}
 	target := Target{KubeContext: req.KubeContext, Namespace: req.Namespace}
-	results := a.deps.Apply(r.Context(), r.PathValue("service"), target, deps)
+	env := cluster.Environment(req.Environment)
+	if env == "" {
+		env = cluster.EnvDev
+	}
+	results := a.deps.Apply(r.Context(), r.PathValue("service"), target, deps, env)
 	writeJSON(w, http.StatusOK, results)
 }
 
