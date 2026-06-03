@@ -37,7 +37,7 @@ spec:
 
 ```
 $ de project up
-✔ cluster: devedge (shared)
+✔ cluster: devedge (shared dev)
 ✔ dependency db (postgres): provisioned
 ✔ db: migrated 0 → 2 (2 applied)
 ✔ db: seeded (dev.sql)

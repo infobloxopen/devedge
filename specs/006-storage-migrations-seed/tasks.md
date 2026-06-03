@@ -107,9 +107,9 @@ Job, in-cluster networking), so e2e coverage is central.
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T020 [P] [S] Structured logging across `internal/migrate` (apply start/result, seed outcome, errors) — Principle V (observable operations).
-- [ ] T021 [P] [S] Docs: update devedge `README.md` / `CLAUDE.md` / `CHANGELOG.md` for the `migrations`/`seed` config and the service-image `migrate` subcommand contract (contracts C2); validate every step in `specs/006-storage-migrations-seed/quickstart.md`.
-- [ ] T022 [S] Final scope diff vs FR-001…FR-013 / SC-001…SC-007 in `specs/006-storage-migrations-seed/SCOPE.md`; confirm no gold-plating and that services declaring no migrations/seed are unchanged (FR-003/US2-AS3).
+- [X] T020 [P] [S] Structured logging across `internal/migrate` (apply start/result, seed outcome, errors) — Principle V (observable operations).
+- [X] T021 [P] [S] Docs: update devedge `README.md` / `CLAUDE.md` / `CHANGELOG.md` for the `migrations`/`seed` config and the service-image `migrate` subcommand contract (contracts C2); validate every step in `specs/006-storage-migrations-seed/quickstart.md`.
+- [X] T022 [S] Final scope diff vs FR-001…FR-013 / SC-001…SC-007 in `specs/006-storage-migrations-seed/SCOPE.md`; confirm no gold-plating and that services declaring no migrations/seed are unchanged (FR-003/US2-AS3).
 
 ---
 

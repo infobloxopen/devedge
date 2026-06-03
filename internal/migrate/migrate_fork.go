@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -79,14 +80,18 @@ func (a *ForkApplier) Migrate(ctx context.Context, dsn string, src Source, store
 	from, dirty := versionAndDirty(m)
 	if from == target && !dirty {
 		// Already at the declared version and clean — idempotent no-op (SC-002).
+		slog.Info("migrate: already current", "version", from)
 		return Result{FromVersion: from, ToVersion: from, AlreadyCurrent: true}, nil
 	}
 
+	slog.Info("migrate: applying", "from", from, "target", target, "dirty", dirty, "store", store.Dir)
 	if err := runBounded(ctx, m, func() error { return m.Migrate(target) }); err != nil {
 		if errors.Is(err, migratelib.ErrNoChange) {
+			slog.Info("migrate: already current", "version", from)
 			return Result{FromVersion: from, ToVersion: from, AlreadyCurrent: true}, nil
 		}
 		// A failed apply leaves the DB dirty; the next run recovers it (FR-007, common case).
+		slog.Error("migrate: failed", "target", target, "error", err)
 		return Result{}, fmt.Errorf("migrate to v%d: %w", target, err)
 	}
 
@@ -96,6 +101,11 @@ func (a *ForkApplier) Migrate(ctx context.Context, dsn string, src Source, store
 		if applied, err = countApplied(store.Dir, from, to); err != nil {
 			return Result{}, err
 		}
+	}
+	if to < from {
+		slog.Info("migrate: rolled back", "from", from, "to", to)
+	} else {
+		slog.Info("migrate: applied", "from", from, "to", to, "count", applied)
 	}
 	return Result{FromVersion: from, ToVersion: to, Applied: applied}, nil
 }

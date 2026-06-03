@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -51,9 +52,11 @@ func (a *ForkApplier) Seed(ctx context.Context, dsn string, seed Source) (bool, 
 		return false, fmt.Errorf("seed: check marker: %w", err)
 	}
 	if exists {
+		slog.Info("seed: already applied", "fingerprint", fingerprint[:12])
 		return false, nil // already seeded for this fingerprint
 	}
 
+	slog.Info("seed: applying", "source", seed.Path, "fingerprint", fingerprint[:12])
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("seed: begin: %w", err)

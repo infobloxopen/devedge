@@ -8,6 +8,61 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+#### Schema migrations and dev seed (006-storage-migrations-seed)
+
+- **`migrations` and `seed` on a postgres dependency**: optional additive fields on a `postgres`
+  dependency in a `kind: Service` `devedge.yaml`. `migrations` points to a directory of versioned
+  `NNN_name.up.sql` / `NNN_name.down.sql` files (golang-migrate convention). `seed` points to a
+  plain SQL file or directory applied once after migrations for local development. Both fields are
+  optional and allowed only on `engine: postgres`; declaring them on any other engine is a
+  parse/validate error. Paths resolve under the project root and must exist at parse time; a
+  migrations directory must contain at least one `*.up.sql`. `seed` without `migrations` is
+  accepted.
+
+- **Apply-before-serve in both modes**: `de project up` brings the dependency's isolated database
+  to the declared schema version **before** the dependency is marked ready — in both local-run mode
+  (applied by the daemon over the port-forward DSN) and `--deploy` mode (applied by a Helm
+  `pre-install`/`pre-upgrade` hook Job before the Deployment rolls). A workload never serves
+  against a partial or unmigrated schema.
+
+- **Idempotent and observable**: migration and seed steps are fully idempotent across repeated
+  `up` runs. `de project up` reports the outcome for each dependency that declares migrations or
+  seed: `migrations: applied N (vX → vY)` / `already current (vN)` / `rolled back (vX → vY)`, and
+  `seed: seeded` / `already seeded` / `skipped (CI)`. `de project down --clean` resets the schema,
+  seed marker, and the persisted down-migration store; plain `down` preserves them.
+
+- **Up-or-down to target; automatic rollback across image versions**: the migrate step targets a
+  version — the highest migration in the current source or image — and migrates up *or* down to
+  reach it. Deploying an older image (with a lower target version) therefore rolls the schema back
+  automatically with no separate rollback command. This is powered by a **persisted
+  down-migration store** that retains applied up/down files so a down step remains available even
+  when the current image or branch no longer ships it. In local-run mode the store is a host
+  directory under the devedge base dir; in deploy mode it is a per-service PersistentVolumeClaim
+  that devedge side-provisions (it persists across deploys; `--clean` removes it). **Note:** the
+  fork's auto-recovery does not retro-apply a transactionally-rolled-back migration. For a botched
+  migration the reliable fix is `de project down --clean` then `de project up` (rebuilds the
+  corrected schema from scratch).
+
+- **Deploy-mode service-image `migrate` subcommand contract (C2)**: in `--deploy` mode devedge
+  renders a Helm `pre-install`/`pre-upgrade` hook Job that runs the **service's own image** as
+  `<image> migrate up`. Images using `--deploy` with declared migrations MUST provide a `migrate`
+  subcommand that reads the DB DSN from `DATABASE_URL` (injected from the per-dependency DSN
+  Secret) and the down-store path from `DEVEDGE_DOWNSTORE`, converges the bundled migrations to
+  their target version (up or down) using the `github.com/infobloxopen/migrate` engine, and exits
+  non-zero on failure. If the image does not provide this subcommand, `de project up --deploy`
+  fails with an actionable error; it never silently skips.
+
+- **Dev seed apply-once, CI skip**: when `seed` is declared, devedge applies it once after
+  migrations succeed and records it via a `devedge_seed` marker table so re-running `up` neither
+  re-applies nor errors. `de project down --clean` removes the marker so the next `up` re-seeds.
+  Seed is skipped entirely in CI/ephemeral environments (`de ci run`), which apply schema
+  migrations only; tests arrange their own fixtures.
+
+- **Migration engine**: powered by the Infoblox `golang-migrate` fork
+  (`github.com/infobloxopen/migrate`, branch `ib`), consumed via a `go.mod` `replace`. Migrations
+  use the standard golang-migrate `NNN_name.up.sql`/`.down.sql` convention and a
+  `schema_migrations` version table.
+
 #### Workload deploy (005-app-workload-deploy)
 
 - **`de project up --deploy`**: new opt-in flag that deploys the service workload into the
