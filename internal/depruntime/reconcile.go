@@ -127,6 +127,15 @@ func (r *Reconciler) reconcileOne(ctx context.Context, service string, d Dep, re
 	if err := r.prov.EnsureConnSecret(ctx, binding); err != nil {
 		return fail(fmt.Errorf("dependency %q: emit in-cluster connection: %w", d.Name, err))
 	}
+	// Provision the deploy-mode persisted down-store PVC when this dependency declares
+	// migrations (006). Local-run uses a host dir, but the in-cluster store is created here
+	// alongside the connection Secret so the deploy hook Job can mount it (it persists
+	// across deploys for FR-012; --clean removes it).
+	if d.Migrations != "" {
+		if err := r.prov.EnsureMigrationStore(ctx, binding); err != nil {
+			return fail(fmt.Errorf("dependency %q: ensure migration store: %w", d.Name, err))
+		}
+	}
 	res.State = StateProvisioned
 
 	port := inst.Port

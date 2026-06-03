@@ -69,7 +69,8 @@ func (f *fakeProvisioner) EnsureDatabase(_ context.Context, b Binding) error {
 	return nil
 }
 
-func (f *fakeProvisioner) EnsureConnSecret(context.Context, Binding) error { return nil }
+func (f *fakeProvisioner) EnsureConnSecret(context.Context, Binding) error     { return nil }
+func (f *fakeProvisioner) EnsureMigrationStore(context.Context, Binding) error { return nil }
 
 func (f *fakeProvisioner) DropDatabase(_ context.Context, b Binding) error {
 	f.mu.Lock()

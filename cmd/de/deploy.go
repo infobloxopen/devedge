@@ -30,6 +30,22 @@ func deployWorkload(res config.Resource, target cluster.ClusterTarget) error {
 		Hostname: hostname,
 		Deps:     depEnvs(res),
 	}
+	// Wire the pre-install/pre-upgrade schema-migration hook when a dependency declares
+	// migrations (006). The hook runs the service image's `migrate` command against the
+	// in-cluster DSN Secret and the side-provisioned down-store PVC (FR-006-deploy/FR-012).
+	if dd, ok := res.(config.DependencyDeclarer); ok {
+		slug := cluster.ProjectSlug(res.Project())
+		for _, dep := range dd.Dependencies() {
+			if dep.Migrations != "" {
+				wl.Migrations = &deploy.MigrationDeploy{
+					SecretName:    slug + "-" + dep.Name + "-dsn",
+					DownStorePVC:  depruntime.DownStorePVCName(res.Project(), dep.Name),
+					DownStorePath: "/var/lib/devedge/downstore",
+				}
+				break
+			}
+		}
+	}
 	src := deploy.ImageSource{Image: w.Image}
 	if w.Build != nil {
 		src.Build = &deploy.BuildSource{Context: w.Build.Context, Dockerfile: w.Build.Dockerfile}
@@ -38,6 +54,11 @@ func deployWorkload(res config.Resource, target cluster.ClusterTarget) error {
 	d := deploy.NewDeployer(target.KubeContext, target.Namespace, target.Name)
 	st, err := d.Deploy(context.Background(), wl, src)
 	if err != nil {
+		// FR-007/R4 (T016): a declared-migrations deploy must not silently skip the hook;
+		// when it fails, point at the service-image `migrate` subcommand contract (C2).
+		if wl.Migrations != nil {
+			return fmt.Errorf("deploy %q: %w\n  the schema-migration hook runs `<image> migrate up`; the service image must provide a `migrate` subcommand (006 contract C2)", res.Project(), err)
+		}
 		return fmt.Errorf("deploy %q: %w", res.Project(), err)
 	}
 	fmt.Printf("%s %s %s %s\n",

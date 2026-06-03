@@ -10,7 +10,7 @@ import (
 func TestChartValues(t *testing.T) {
 	v := chartValues("my-svc", "img:tag", 8080, 2, "my-svc.dev.test", []DepEnv{
 		{Name: "db", Engine: "postgres", Version: "16", EnvVar: "DATABASE_URL"},
-	})
+	}, nil)
 	svc, ok := v["service"].(map[string]any)
 	if !ok {
 		t.Fatalf("service values missing: %+v", v)
@@ -25,6 +25,24 @@ func TestChartValues(t *testing.T) {
 	}
 	if deps[0]["name"] != "db" || deps[0]["envVar"] != "DATABASE_URL" {
 		t.Errorf("dependency values = %+v", deps[0])
+	}
+	// No migrations declared → no migrations block (the hook Job template stays empty).
+	if _, present := v["migrations"]; present {
+		t.Errorf("migrations block should be absent when nil, got %+v", v["migrations"])
+	}
+}
+
+// 006/T015: chartValues renders the migrations block (the hook Job inputs) when a
+// MigrationDeploy is supplied.
+func TestChartValues_Migrations(t *testing.T) {
+	mig := &MigrationDeploy{SecretName: "my-svc-db-dsn", DownStorePVC: "my-svc-db-downstore", DownStorePath: "/var/lib/devedge/downstore"}
+	v := chartValues("my-svc", "img:tag", 8080, 1, "my-svc.dev.test", nil, mig)
+	m, ok := v["migrations"].(map[string]any)
+	if !ok {
+		t.Fatalf("migrations block missing: %+v", v)
+	}
+	if m["secretName"] != "my-svc-db-dsn" || m["downStorePVC"] != "my-svc-db-downstore" || m["downStorePath"] != "/var/lib/devedge/downstore" {
+		t.Errorf("migrations values = %+v", m)
 	}
 }
 

@@ -23,8 +23,9 @@ func (apiFakeProv) EnsureInstance(_ context.Context, ref depruntime.InstanceRef)
 }
 func (apiFakeProv) Ready(context.Context, depruntime.InstanceRef) error       { return nil }
 func (apiFakeProv) EnsureDatabase(context.Context, depruntime.Binding) error   { return nil }
-func (apiFakeProv) EnsureConnSecret(context.Context, depruntime.Binding) error { return nil }
-func (apiFakeProv) DropDatabase(context.Context, depruntime.Binding) error   { return nil }
+func (apiFakeProv) EnsureConnSecret(context.Context, depruntime.Binding) error     { return nil }
+func (apiFakeProv) EnsureMigrationStore(context.Context, depruntime.Binding) error { return nil }
+func (apiFakeProv) DropDatabase(context.Context, depruntime.Binding) error         { return nil }
 
 func depAPI(t *testing.T) http.Handler {
 	t.Helper()
