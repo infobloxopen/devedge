@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -294,7 +295,17 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 				if err := ensurer.EnsureCluster(context.Background(), target.Name); err != nil {
 					return err
 				}
-				if err := provisionDependencies(c, res.Project(), dd.Dependencies(), target); err != nil {
+				// Resolve declared schema migrations/seed to absolute paths against
+				// the project root (the dir of -f); a config error here aborts up (006).
+				var migs []config.DependencyMigrations
+				if md, ok := res.(config.MigrationDeclarer); ok {
+					m, err := md.Migrations(filepath.Dir(file))
+					if err != nil {
+						return err
+					}
+					migs = m
+				}
+				if err := provisionDependencies(c, res.Project(), dd.Dependencies(), migs, target); err != nil {
 					return err
 				}
 			}

@@ -76,6 +76,17 @@ func FilePath(baseDir, service, dependency string) string {
 	return filepath.Clean(filepath.Join(baseDir, "services", service, dependency+".dsn"))
 }
 
+// DownStoreDir returns the canonical persisted down-migration store directory for
+// a service dependency (006), a sibling of the DSN file:
+//
+//	<baseDir>/services/<service>/<dependency>.downstore
+//
+// The migration engine persists the applied up/down files here so a rollback
+// survives the source tree changing (FR-012); `down --clean` removes it.
+func DownStoreDir(baseDir, service, dependency string) string {
+	return filepath.Clean(filepath.Join(baseDir, "services", service, dependency+".downstore"))
+}
+
 // WriteDSNFile atomically writes realDSN to path with mode 0600, creating
 // all parent directories (mode 0700) as needed.
 //

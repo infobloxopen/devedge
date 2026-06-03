@@ -46,6 +46,10 @@ type DependencyRequest struct {
 	Version   string `json:"version,omitempty"`
 	Port      int    `json:"port,omitempty"`
 	Dedicated bool   `json:"dedicated,omitempty"` // FR-016: isolated per-service instance
+	// Migrations/Seed are absolute host paths resolved CLI-side from the project
+	// root (006). The daemon runs on the same host, so the paths are valid here.
+	Migrations string `json:"migrations,omitempty"`
+	Seed       string `json:"seed,omitempty"`
 }
 
 // ApplyRequest is the PUT .../dependencies body: the declared dependencies plus
@@ -69,7 +73,7 @@ func (a *API) applyDependencies(w http.ResponseWriter, r *http.Request) {
 	}
 	deps := make([]depruntime.Dep, len(req.Dependencies))
 	for i, q := range req.Dependencies {
-		deps[i] = depruntime.Dep{Name: q.Name, Engine: depruntime.Engine(q.Engine), Version: q.Version, Port: q.Port, Dedicated: q.Dedicated}
+		deps[i] = depruntime.Dep{Name: q.Name, Engine: depruntime.Engine(q.Engine), Version: q.Version, Port: q.Port, Dedicated: q.Dedicated, Migrations: q.Migrations, Seed: q.Seed}
 	}
 	target := Target{KubeContext: req.KubeContext, Namespace: req.Namespace}
 	results := a.deps.Apply(r.Context(), r.PathValue("service"), target, deps)

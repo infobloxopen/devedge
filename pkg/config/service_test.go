@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -421,5 +422,249 @@ func TestServiceToRoutes_empty(t *testing.T) {
 	}
 	if len(routes) != 0 {
 		t.Errorf("len = %d, want 0", len(routes))
+	}
+}
+
+// T003: migrations/seed fields — strict-decode, engine-gate, and Migrations().
+
+func TestParseService_migrationsDecode(t *testing.T) {
+	// migrations: and seed: on a postgres dependency decode into the new fields.
+	doc := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: widgets
+spec:
+  dev:
+    hostname: widgets.dev.test
+  dependencies:
+    - name: db
+      engine: postgres
+      port: 5432
+      migrations: db/migrations
+      seed: db/seed/dev.sql
+`)
+	cfg, err := ParseService(doc)
+	if err != nil {
+		t.Fatalf("ParseService: %v", err)
+	}
+	if len(cfg.Spec.Dependencies) != 1 {
+		t.Fatalf("dependencies len = %d, want 1", len(cfg.Spec.Dependencies))
+	}
+	d := cfg.Spec.Dependencies[0]
+	if d.Migrations != "db/migrations" {
+		t.Errorf("Migrations = %q, want %q", d.Migrations, "db/migrations")
+	}
+	if d.Seed != "db/seed/dev.sql" {
+		t.Errorf("Seed = %q, want %q", d.Seed, "db/seed/dev.sql")
+	}
+}
+
+func TestParseService_migrationsEngineGate(t *testing.T) {
+	// migrations on a non-postgres engine must be rejected.
+	doc := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: widgets
+spec:
+  dev:
+    hostname: widgets.dev.test
+  dependencies:
+    - name: cache
+      engine: redis
+      port: 6379
+      migrations: db/migrations
+`)
+	_, err := ParseService(doc)
+	if err == nil {
+		t.Fatal("expected error for migrations on redis dependency, got nil")
+	}
+	if !strings.Contains(err.Error(), "cache") {
+		t.Errorf("error should name the dependency %q: %v", "cache", err)
+	}
+	if !strings.Contains(err.Error(), "redis") {
+		t.Errorf("error should name the engine %q: %v", "redis", err)
+	}
+}
+
+func TestParseService_seedEngineGate(t *testing.T) {
+	// seed on a non-postgres engine must also be rejected.
+	doc := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: widgets
+spec:
+  dev:
+    hostname: widgets.dev.test
+  dependencies:
+    - name: cache
+      engine: redis
+      port: 6379
+      seed: db/seed/dev.sql
+`)
+	_, err := ParseService(doc)
+	if err == nil {
+		t.Fatal("expected error for seed on redis dependency, got nil")
+	}
+	if !strings.Contains(err.Error(), "cache") {
+		t.Errorf("error should name the dependency %q: %v", "cache", err)
+	}
+	if !strings.Contains(err.Error(), "redis") {
+		t.Errorf("error should name the engine %q: %v", "redis", err)
+	}
+}
+
+func TestParseService_seedWithoutMigrationsAllowed(t *testing.T) {
+	// seed without migrations on postgres is explicitly allowed.
+	doc := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: widgets
+spec:
+  dev:
+    hostname: widgets.dev.test
+  dependencies:
+    - name: db
+      engine: postgres
+      port: 5432
+      seed: db/seed/dev.sql
+`)
+	cfg, err := ParseService(doc)
+	if err != nil {
+		t.Fatalf("seed-without-migrations should be allowed: %v", err)
+	}
+	if cfg.Spec.Dependencies[0].Seed != "db/seed/dev.sql" {
+		t.Errorf("Seed = %q, want %q", cfg.Spec.Dependencies[0].Seed, "db/seed/dev.sql")
+	}
+	if cfg.Spec.Dependencies[0].Migrations != "" {
+		t.Errorf("Migrations should be empty, got %q", cfg.Spec.Dependencies[0].Migrations)
+	}
+}
+
+// helpers for Migrations() tests — build a minimal valid *ServiceConfig without a real YAML parse.
+func makeServiceCfg(depName, engine, migrations, seed string) *ServiceConfig {
+	return &ServiceConfig{
+		APIVersion: APIVersion,
+		Kind:       KindService,
+		Metadata:   ObjectMeta{Name: "widgets"},
+		Spec: ServiceSpec{
+			Dev: ServiceDev{Hostname: "widgets.dev.test"},
+			Dependencies: []Dependency{
+				{Name: depName, Engine: engine, Port: 5432, Migrations: migrations, Seed: seed},
+			},
+		},
+	}
+}
+
+func TestServiceMigrations_resolvesAbsDir(t *testing.T) {
+	dir := t.TempDir()
+	// create migrations dir with at least one *.up.sql file
+	migsDir := dir + "/db/migrations"
+	if err := os.MkdirAll(migsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(migsDir+"/001_init.up.sql", []byte("CREATE TABLE x();"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(migsDir+"/001_init.down.sql", []byte("DROP TABLE x;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := makeServiceCfg("db", "postgres", "db/migrations", "")
+	results, err := cfg.Migrations(dir)
+	if err != nil {
+		t.Fatalf("Migrations: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len = %d, want 1", len(results))
+	}
+	dm := results[0]
+	if dm.Dependency != "db" {
+		t.Errorf("Dependency = %q, want %q", dm.Dependency, "db")
+	}
+	if dm.Dir != migsDir {
+		t.Errorf("Dir = %q, want %q", dm.Dir, migsDir)
+	}
+	if dm.Seed != "" {
+		t.Errorf("Seed should be empty, got %q", dm.Seed)
+	}
+}
+
+func TestServiceMigrations_nonExistentPath(t *testing.T) {
+	dir := t.TempDir()
+	cfg := makeServiceCfg("db", "postgres", "db/does-not-exist", "")
+	_, err := cfg.Migrations(dir)
+	if err == nil {
+		t.Fatal("expected error for non-existent migrations path, got nil")
+	}
+}
+
+func TestServiceMigrations_emptyDir(t *testing.T) {
+	dir := t.TempDir()
+	migsDir := dir + "/db/migrations"
+	if err := os.MkdirAll(migsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// no *.up.sql files
+	cfg := makeServiceCfg("db", "postgres", "db/migrations", "")
+	_, err := cfg.Migrations(dir)
+	if err == nil {
+		t.Fatal("expected error for migrations dir with no *.up.sql files, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error should mention 'empty': %v", err)
+	}
+}
+
+func TestServiceMigrations_pathEscapesProjectDir(t *testing.T) {
+	dir := t.TempDir()
+	cfg := makeServiceCfg("db", "postgres", "../outside", "")
+	_, err := cfg.Migrations(dir)
+	if err == nil {
+		t.Fatal("expected error for path escaping project dir, got nil")
+	}
+}
+
+func TestServiceMigrations_seedFileResolved(t *testing.T) {
+	dir := t.TempDir()
+	// create migrations dir
+	migsDir := dir + "/db/migrations"
+	if err := os.MkdirAll(migsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(migsDir+"/001_init.up.sql", []byte("CREATE TABLE x();"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// create seed file
+	seedDir := dir + "/db/seed"
+	if err := os.MkdirAll(seedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seedFile := seedDir + "/dev.sql"
+	if err := os.WriteFile(seedFile, []byte("INSERT INTO x VALUES (1);"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := makeServiceCfg("db", "postgres", "db/migrations", "db/seed/dev.sql")
+	results, err := cfg.Migrations(dir)
+	if err != nil {
+		t.Fatalf("Migrations: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len = %d, want 1", len(results))
+	}
+	if results[0].Seed != seedFile {
+		t.Errorf("Seed = %q, want %q", results[0].Seed, seedFile)
+	}
+}
+
+func TestServiceMigrations_noDeclaredDepsExcluded(t *testing.T) {
+	// A dependency declaring neither migrations nor seed must NOT appear in the result.
+	cfg := makeServiceCfg("db", "postgres", "", "")
+	results, err := cfg.Migrations(t.TempDir())
+	if err != nil {
+		t.Fatalf("Migrations: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected empty slice, got %d entries", len(results))
 	}
 }

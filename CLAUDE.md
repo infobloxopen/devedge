@@ -77,6 +77,8 @@ See `.claude/skills/README.md` for the template and conventions.
 - cluster state is k3d/Docker; per-service dependency data persists in PVCs (003, unchanged); a host-level lockfile under `~/.devedge/` guards concurrent cluster-ensure. (004-cluster-topology)
 - Go 1.23 (existing devedge module) + `internal/cluster` (004 — resolved `ClusterTarget` + `EnsureCluster`), (005-app-workload-deploy)
 - workload state is k8s (a Helm release per service); per-service dependency data persists in (005-app-workload-deploy)
+- Go 1.25.5 (module `github.com/infobloxopen/devedge`) + `spf13/cobra` (CLI), `gopkg.in/yaml.v3` (strict config decode), `helm` CLI (006-storage-migrations-seed)
+- Postgres (the per-service isolated DB from 003). New state: the engine's `schema_migrations` (006-storage-migrations-seed)
 
 ## Workload deploy (005-app-workload-deploy)
 
@@ -114,5 +116,6 @@ Cluster ensure logic (idempotent, host-`flock`, cert-manager bootstrap) lives in
 `internal/cluster/ensure.go`. Topology resolution is in `internal/cluster/topology.go`.
 
 ## Recent Changes
+- 006-storage-migrations-seed: Added Go 1.25.5 (module `github.com/infobloxopen/devedge`) + `spf13/cobra` (CLI), `gopkg.in/yaml.v3` (strict config decode), `helm` CLI
 - 005-app-workload-deploy: Added Go 1.23 (existing devedge module) + `internal/cluster` (004 — resolved `ClusterTarget` + `EnsureCluster`),
 - 001-fix-dns-udp-bind: Added Go 1.25.5 (from `go.mod`)

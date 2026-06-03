@@ -120,6 +120,10 @@ func (m *DepManager) Apply(ctx context.Context, service string, target Target, d
 	for _, r := range results {
 		if r.Ready() {
 			m.logger.Info("dependency ready", "service", service, "dependency", r.Name, "engine", r.Engine, "context", target.KubeContext)
+			if mo := r.Migration; mo != nil {
+				m.logger.Info("schema migrated", "service", service, "dependency", r.Name,
+					"applied", mo.Applied, "version", mo.ToVersion, "alreadyCurrent", mo.AlreadyCurrent)
+			}
 		} else {
 			m.logger.Warn("dependency not ready", "service", service, "dependency", r.Name, "state", r.State, "error", r.Err, "context", target.KubeContext)
 		}
