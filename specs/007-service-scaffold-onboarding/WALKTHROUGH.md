@@ -114,3 +114,12 @@ AGENTS.md/README — that's a friction bug; file it against the scaffold templat
   actionable error naming *where* it looked; (c) `de doctor` asks the **daemon** to check
   its toolchain (the shell's PATH is the wrong vantage point); (d) the error should say
   the exec happened daemon-side.
+- **2026-06-10, dgarcia — friction #3 (step 4, same onion):** with PATH fixed, helm ran but
+  failed `context "k3d-devedge" does not exist` — the daemon runs as root (LaunchDaemon), so
+  helm read /var/root/.kube/config while k3d had written the context to the user's
+  ~/.kube/config CLI-side. Workaround: add `KUBECONFIG=/Users/<user>/.kube/config` to the
+  plist EnvironmentVariables + reload. Durable fix: `de install` must write BOTH the
+  discovered tool PATH and the user's KUBECONFIG into the daemon plist (it already writes
+  DEVEDGE_HOME — same idea), or daemon-side execs should set them explicitly. The split-
+  brain (cluster ensure CLI-side as user, provisioning daemon-side as root) is the root
+  design issue to revisit.
