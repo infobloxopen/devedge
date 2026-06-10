@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package {{.ProtoPkg}}.v1;
+
+import "google/api/annotations.proto";
+import "infoblox/authz/v1/authz.proto";
+
+option go_package = "{{.Module}}/internal/gen/{{.ProtoPkg}}/v1;{{.ProtoPkg}}v1";
+
+// WebhookEndpoint is the example resource this scaffold ships — rename it to
+// your own resource (see AGENTS.md for the rename flow). It is deliberately
+// security-shaped: `secret` exists so you confront secret-field handling
+// (never echo it back in real services) from day one.
+message WebhookEndpoint {
+  string id = 1;
+  string url = 2;
+  string secret = 3;
+  repeated string event_filters = 4;
+}
+
+message CreateWebhookEndpointRequest {
+  WebhookEndpoint endpoint = 1;
+}
+
+message GetWebhookEndpointRequest {
+  string id = 1;
+}
+
+message ListWebhookEndpointsRequest {}
+
+message ListWebhookEndpointsResponse {
+  repeated WebhookEndpoint endpoints = 1;
+}
+
+message UpdateWebhookEndpointRequest {
+  WebhookEndpoint endpoint = 1;
+}
+
+message DeleteWebhookEndpointRequest {
+  string id = 1;
+}
+
+message DeleteWebhookEndpointResponse {}
+
+// Every RPC declares its authorization requirement once, here. The server
+// enforces these fail-closed (an RPC without a rule refuses to boot — try
+// removing one and running `make run`), and the same declarations feed the
+// permission catalog.
+service WebhookEndpoints {
+  rpc CreateWebhookEndpoint(CreateWebhookEndpointRequest) returns (WebhookEndpoint) {
+    option (infoblox.authz.v1.rule) = {verb: "create", resource: "webhook-endpoint"};
+    option (google.api.http) = {
+      post: "/v1/webhook-endpoints"
+      body: "endpoint"
+    };
+  }
+  rpc GetWebhookEndpoint(GetWebhookEndpointRequest) returns (WebhookEndpoint) {
+    option (infoblox.authz.v1.rule) = {verb: "get", resource: "webhook-endpoint"};
+    option (google.api.http) = {get: "/v1/webhook-endpoints/{id}"};
+  }
+  rpc ListWebhookEndpoints(ListWebhookEndpointsRequest) returns (ListWebhookEndpointsResponse) {
+    option (infoblox.authz.v1.rule) = {verb: "list", resource: "webhook-endpoint"};
+    option (google.api.http) = {get: "/v1/webhook-endpoints"};
+  }
+  rpc UpdateWebhookEndpoint(UpdateWebhookEndpointRequest) returns (WebhookEndpoint) {
+    option (infoblox.authz.v1.rule) = {verb: "update", resource: "webhook-endpoint"};
+    option (google.api.http) = {
+      put: "/v1/webhook-endpoints/{endpoint.id}"
+      body: "endpoint"
+    };
+  }
+  rpc DeleteWebhookEndpoint(DeleteWebhookEndpointRequest) returns (DeleteWebhookEndpointResponse) {
+    option (infoblox.authz.v1.rule) = {verb: "delete", resource: "webhook-endpoint"};
+    option (google.api.http) = {delete: "/v1/webhook-endpoints/{id}"};
+  }
+}

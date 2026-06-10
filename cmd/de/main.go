@@ -238,7 +238,7 @@ func projectCmd() *cobra.Command {
 		Use:   "project",
 		Short: "Manage project routes",
 	}
-	cmd.AddCommand(projectUpCmd(), projectDownCmd(), projectChartCmd())
+	cmd.AddCommand(projectUpCmd(), projectDownCmd(), projectChartCmd(), projectInitCmd())
 	return cmd
 }
 

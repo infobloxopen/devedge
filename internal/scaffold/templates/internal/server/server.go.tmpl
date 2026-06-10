@@ -1,0 +1,102 @@
+// Package server implements the {{.Name}} gRPC service over a pluggable
+// Store. Handlers stay thin: validation + storage; authorization is enforced
+// by the interceptor wired in cmd/{{.Name}} (declared per-RPC in the proto).
+package server
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	{{.ProtoPkg}}v1 "{{.Module}}/internal/gen/{{.ProtoPkg}}/v1"
+)
+
+// ErrNotFound is returned by Stores when an id does not exist; the server
+// maps it to a gRPC NotFound.
+var ErrNotFound = errors.New("not found")
+
+// Store is the persistence seam. The scaffold ships a Postgres
+// implementation (internal/store); tests use an in-memory fake.
+type Store interface {
+	Create(ctx context.Context, e *{{.ProtoPkg}}v1.WebhookEndpoint) error
+	Get(ctx context.Context, id string) (*{{.ProtoPkg}}v1.WebhookEndpoint, error)
+	List(ctx context.Context) ([]*{{.ProtoPkg}}v1.WebhookEndpoint, error)
+	Update(ctx context.Context, e *{{.ProtoPkg}}v1.WebhookEndpoint) error
+	Delete(ctx context.Context, id string) error
+}
+
+// Server implements {{.ProtoPkg}}v1.WebhookEndpointsServer.
+type Server struct {
+	{{.ProtoPkg}}v1.UnimplementedWebhookEndpointsServer
+	store Store
+}
+
+// New builds a Server over the given Store.
+func New(store Store) *Server { return &Server{store: store} }
+
+func (s *Server) CreateWebhookEndpoint(ctx context.Context, req *{{.ProtoPkg}}v1.CreateWebhookEndpointRequest) (*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	e := req.GetEndpoint()
+	if e == nil || e.GetUrl() == "" {
+		return nil, status.Error(codes.InvalidArgument, "endpoint.url is required")
+	}
+	if e.GetId() == "" {
+		e.Id = newID()
+	}
+	if err := s.store.Create(ctx, e); err != nil {
+		return nil, storeErr(err)
+	}
+	return e, nil
+}
+
+func (s *Server) GetWebhookEndpoint(ctx context.Context, req *{{.ProtoPkg}}v1.GetWebhookEndpointRequest) (*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	e, err := s.store.Get(ctx, req.GetId())
+	if err != nil {
+		return nil, storeErr(err)
+	}
+	return e, nil
+}
+
+func (s *Server) ListWebhookEndpoints(ctx context.Context, _ *{{.ProtoPkg}}v1.ListWebhookEndpointsRequest) (*{{.ProtoPkg}}v1.ListWebhookEndpointsResponse, error) {
+	items, err := s.store.List(ctx)
+	if err != nil {
+		return nil, storeErr(err)
+	}
+	return &{{.ProtoPkg}}v1.ListWebhookEndpointsResponse{Endpoints: items}, nil
+}
+
+func (s *Server) UpdateWebhookEndpoint(ctx context.Context, req *{{.ProtoPkg}}v1.UpdateWebhookEndpointRequest) (*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	e := req.GetEndpoint()
+	if e.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "endpoint.id is required")
+	}
+	if err := s.store.Update(ctx, e); err != nil {
+		return nil, storeErr(err)
+	}
+	return e, nil
+}
+
+func (s *Server) DeleteWebhookEndpoint(ctx context.Context, req *{{.ProtoPkg}}v1.DeleteWebhookEndpointRequest) (*{{.ProtoPkg}}v1.DeleteWebhookEndpointResponse, error) {
+	if err := s.store.Delete(ctx, req.GetId()); err != nil {
+		return nil, storeErr(err)
+	}
+	return &{{.ProtoPkg}}v1.DeleteWebhookEndpointResponse{}, nil
+}
+
+// storeErr maps storage errors to clean gRPC statuses — no SQL or driver
+// details leak to clients.
+func storeErr(err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return status.Error(codes.NotFound, "webhook endpoint not found")
+	}
+	return status.Error(codes.Internal, "storage failure")
+}
+
+func newID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}

@@ -1,0 +1,18 @@
+module {{.Module}}
+
+go {{.GoVersion}}
+
+require (
+	github.com/golang-migrate/migrate/v4 v4.17.1
+	github.com/grpc-ecosystem/grpc-gateway/v2 {{.Versions.Gateway}}
+	github.com/infobloxopen/apis/proto/infoblox/authz {{.Versions.AuthzModule}}
+	github.com/infobloxopen/devedge-sdk {{.Versions.SDK}}
+	github.com/jackc/pgx/v5 {{.Versions.PGX}}
+	google.golang.org/grpc {{.Versions.GRPC}}
+	google.golang.org/protobuf {{.Versions.Protobuf}}
+)
+
+// The org-standard migration engine: the Infoblox fork keeps the upstream
+// module path, so it is consumed via replace (persisted down-store +
+// dirty-state recovery — the devedge deploy hook relies on both).
+replace github.com/golang-migrate/migrate/v4 => github.com/infobloxopen/migrate/v4 v4.16.3-0.20260414025640-b28cb3bc8342

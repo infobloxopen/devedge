@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+
+# ---- builder ----------------------------------------------------------------
+FROM golang:{{.GoVersion}}-alpine AS builder
+
+WORKDIR /src
+COPY . .
+RUN go build -o /out/{{.Name}} ./cmd/{{.Name}}
+
+# ---- runtime ----------------------------------------------------------------
+FROM gcr.io/distroless/base-debian12
+
+COPY --from=builder /out/{{.Name}} /{{.Name}}
+# db/migrations are read by `<binary> migrate up` (de deploy hook, feature 006)
+COPY --from=builder /src/db/migrations /migrations
+
+ENTRYPOINT ["/{{.Name}}"]
+CMD ["serve"]

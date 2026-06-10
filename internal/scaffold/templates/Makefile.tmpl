@@ -1,0 +1,31 @@
+.PHONY: generate build test run
+
+# generate: preflight tool checks, then buf generate, then tidy.
+generate:
+	@if ! command -v buf >/dev/null 2>&1; then \
+		echo "ERROR: buf not found on PATH. Install: go install github.com/bufbuild/buf/cmd/buf@latest"; \
+		exit 1; \
+	fi
+	@if ! command -v protoc-gen-go >/dev/null 2>&1; then \
+		echo "ERROR: protoc-gen-go not found on PATH. Install: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest"; \
+		exit 1; \
+	fi
+	@if ! command -v protoc-gen-go-grpc >/dev/null 2>&1; then \
+		echo "ERROR: protoc-gen-go-grpc not found on PATH. Install: go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest"; \
+		exit 1; \
+	fi
+	@if ! command -v protoc-gen-grpc-gateway >/dev/null 2>&1; then \
+		echo "ERROR: protoc-gen-grpc-gateway not found on PATH. Install: go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest"; \
+		exit 1; \
+	fi
+	buf generate
+	go mod tidy
+
+build:
+	go build ./...
+
+test:
+	go test ./...
+
+run:
+	go run ./cmd/{{.Name}} serve

@@ -1,0 +1,14 @@
+version: v2
+modules:
+  - path: proto
+  - path: third_party/proto
+lint:
+  use:
+    - STANDARD
+  ignore:
+    - third_party/proto
+breaking:
+  use:
+    - WIRE_JSON
+  ignore:
+    - third_party/proto

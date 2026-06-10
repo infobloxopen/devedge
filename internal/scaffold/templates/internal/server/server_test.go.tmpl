@@ -1,0 +1,217 @@
+package server
+
+import (
+	"context"
+	"sync"
+	"testing"
+
+	{{.ProtoPkg}}v1 "{{.Module}}/internal/gen/{{.ProtoPkg}}/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// fakeStore is an in-memory, map-backed implementation of Store used in tests.
+// It is safe for sequential test use; no goroutine-safety guarantees are made
+// beyond what sync.Mutex provides for parallel sub-tests.
+type fakeStore struct {
+	mu    sync.Mutex
+	items map[string]*{{.ProtoPkg}}v1.WebhookEndpoint
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{items: make(map[string]*{{.ProtoPkg}}v1.WebhookEndpoint)}
+}
+
+func (s *fakeStore) Create(ctx context.Context, ep *{{.ProtoPkg}}v1.WebhookEndpoint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[ep.Id] = ep
+	return nil
+}
+
+func (s *fakeStore) Get(ctx context.Context, id string) (*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ep, ok := s.items[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return ep, nil
+}
+
+func (s *fakeStore) List(ctx context.Context) ([]*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*{{.ProtoPkg}}v1.WebhookEndpoint, 0, len(s.items))
+	for _, ep := range s.items {
+		out = append(out, ep)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) Update(ctx context.Context, ep *{{.ProtoPkg}}v1.WebhookEndpoint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[ep.Id] = ep
+	return nil
+}
+
+func (s *fakeStore) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.items, id)
+	return nil
+}
+
+func TestServer_CreateAssignsID(t *testing.T) {
+	store := newFakeStore()
+	srv := New(store)
+
+	req := &{{.ProtoPkg}}v1.CreateWebhookEndpointRequest{
+		Endpoint: &{{.ProtoPkg}}v1.WebhookEndpoint{
+			Url:    "https://example.com/hook",
+			Secret: "s3cr3t",
+		},
+	}
+	got, err := srv.CreateWebhookEndpoint(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateWebhookEndpoint: %v", err)
+	}
+	if got.Id == "" {
+		t.Fatal("CreateWebhookEndpoint: returned endpoint has empty Id")
+	}
+}
+
+func TestServer_CreatePersists(t *testing.T) {
+	store := newFakeStore()
+	srv := New(store)
+
+	req := &{{.ProtoPkg}}v1.CreateWebhookEndpointRequest{
+		Endpoint: &{{.ProtoPkg}}v1.WebhookEndpoint{
+			Url:          "https://example.com/hook",
+			Secret:       "s3cr3t",
+			EventFilters: []string{"push", "pr"},
+		},
+	}
+	created, err := srv.CreateWebhookEndpoint(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateWebhookEndpoint: %v", err)
+	}
+
+	// The item must now be retrievable.
+	got, err := srv.GetWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.GetWebhookEndpointRequest{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetWebhookEndpoint after create: %v", err)
+	}
+	if got.Id != created.Id {
+		t.Errorf("Get returned id %q, want %q", got.Id, created.Id)
+	}
+	if got.Url != req.Endpoint.Url {
+		t.Errorf("Get returned url %q, want %q", got.Url, req.Endpoint.Url)
+	}
+}
+
+func TestServer_GetUnknownReturnsNotFound(t *testing.T) {
+	store := newFakeStore()
+	srv := New(store)
+
+	_, err := srv.GetWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.GetWebhookEndpointRequest{Id: "does-not-exist"})
+	if err == nil {
+		t.Fatal("GetWebhookEndpoint unknown id: expected error, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("GetWebhookEndpoint unknown id: expected gRPC status error, got %T: %v", err, err)
+	}
+	if st.Code() != codes.NotFound {
+		t.Errorf("GetWebhookEndpoint unknown id: got status %v, want %v", st.Code(), codes.NotFound)
+	}
+}
+
+func TestServer_ListReturnsCreatedItems(t *testing.T) {
+	store := newFakeStore()
+	srv := New(store)
+
+	endpoints := []*{{.ProtoPkg}}v1.WebhookEndpoint{
+		{Url: "https://a.example.com/hook", Secret: "aaa"},
+		{Url: "https://b.example.com/hook", Secret: "bbb"},
+	}
+	for _, ep := range endpoints {
+		_, err := srv.CreateWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.CreateWebhookEndpointRequest{Endpoint: ep})
+		if err != nil {
+			t.Fatalf("CreateWebhookEndpoint: %v", err)
+		}
+	}
+
+	resp, err := srv.ListWebhookEndpoints(context.Background(), &{{.ProtoPkg}}v1.ListWebhookEndpointsRequest{})
+	if err != nil {
+		t.Fatalf("ListWebhookEndpoints: %v", err)
+	}
+	if len(resp.Endpoints) != len(endpoints) {
+		t.Errorf("ListWebhookEndpoints: got %d items, want %d", len(resp.Endpoints), len(endpoints))
+	}
+}
+
+func TestServer_UpdateOverwrites(t *testing.T) {
+	store := newFakeStore()
+	srv := New(store)
+
+	created, err := srv.CreateWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.CreateWebhookEndpointRequest{
+		Endpoint: &{{.ProtoPkg}}v1.WebhookEndpoint{Url: "https://old.example.com/hook", Secret: "old"},
+	})
+	if err != nil {
+		t.Fatalf("CreateWebhookEndpoint: %v", err)
+	}
+
+	updatedEp := &{{.ProtoPkg}}v1.WebhookEndpoint{
+		Id:     created.Id,
+		Url:    "https://new.example.com/hook",
+		Secret: "new-secret",
+	}
+	got, err := srv.UpdateWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.UpdateWebhookEndpointRequest{Endpoint: updatedEp})
+	if err != nil {
+		t.Fatalf("UpdateWebhookEndpoint: %v", err)
+	}
+	if got.Url != updatedEp.Url {
+		t.Errorf("UpdateWebhookEndpoint: got url %q, want %q", got.Url, updatedEp.Url)
+	}
+
+	// Verify the store reflects the update.
+	fetched, err := srv.GetWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.GetWebhookEndpointRequest{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetWebhookEndpoint after update: %v", err)
+	}
+	if fetched.Url != updatedEp.Url {
+		t.Errorf("Get after update: got url %q, want %q", fetched.Url, updatedEp.Url)
+	}
+}
+
+func TestServer_DeleteRemovesItem(t *testing.T) {
+	store := newFakeStore()
+	srv := New(store)
+
+	created, err := srv.CreateWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.CreateWebhookEndpointRequest{
+		Endpoint: &{{.ProtoPkg}}v1.WebhookEndpoint{Url: "https://example.com/hook", Secret: "s"},
+	})
+	if err != nil {
+		t.Fatalf("CreateWebhookEndpoint: %v", err)
+	}
+
+	_, err = srv.DeleteWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.DeleteWebhookEndpointRequest{Id: created.Id})
+	if err != nil {
+		t.Fatalf("DeleteWebhookEndpoint: %v", err)
+	}
+
+	// Subsequent Get must return NotFound.
+	_, err = srv.GetWebhookEndpoint(context.Background(), &{{.ProtoPkg}}v1.GetWebhookEndpointRequest{Id: created.Id})
+	if err == nil {
+		t.Fatal("GetWebhookEndpoint after delete: expected NotFound error, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("GetWebhookEndpoint after delete: expected gRPC status error, got %T: %v", err, err)
+	}
+	if st.Code() != codes.NotFound {
+		t.Errorf("GetWebhookEndpoint after delete: got status %v, want %v", st.Code(), codes.NotFound)
+	}
+}
