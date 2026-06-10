@@ -146,3 +146,24 @@ AGENTS.md/README — that's a friction bug; file it against the scaffold templat
   in-process with absolute paths, so this default-flag path was never exercised.
   Workaround: `de project up -f "$PWD/devedge.yaml"`. Fix: make the project dir absolute
   before resolution (one line) + a regression test pinning relative `-f`.
+
+## Tests that would have caught these (the 008 test plan)
+
+Two systemic gaps explain all six findings: every e2e drives **library seams in-process**
+(never the CLI flag layer → daemon socket), and every test inherits the **developer's rich
+shell env** (never launchd's sanitized world). Constitution III was satisfied in letter
+(real k3d/Postgres) but not in spirit (wrong entry path + environment).
+
+1. **CLI-surface e2e** — run the built `de` with DEFAULT flags from inside a project dir,
+   against a daemon whose cwd is `/`. (Catches #6; covers the whole flag→socket layer.)
+2. **Launchd-equivalence harness** — start devedged via `env -i PATH=/usr/bin:/bin
+   DEVEDGE_HOME=…` (+ HOME unset / temp), stub tools in a controlled PATH; assert
+   actionable, pre-mutation failures. (Catches #1/#2/#3 and the #4 class.)
+3. **Plist golden test** — `de install` output must contain EnvironmentVariables
+   PATH/KUBECONFIG/HOME (pins the #2–#4 fix).
+4. **Slow-tool stub** — fake kubectl sleeping past the establishment timeout (pins #5);
+   superseded by a "no kubectl exec" contract once port-forwards move to client-go.
+5. **Absolute-path invariant** — every path in any CLI→daemon request type is absolute
+   (generalizes the #6 regression beyond migrations/seed).
+6. **Doctor-as-test** — `de doctor` validates the toolchain from the DAEMON's vantage
+   (resolve + exec via the daemon), so machine-specific shims fail at doctor, not at up.
