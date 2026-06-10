@@ -38,3 +38,59 @@ developer new to the platform remains to be scheduled; record its duration here.
 
 These are exactly the papercuts the vision's "run it early — it is the product"
 directive was meant to surface before the first real user hits them.
+
+## How to run the human measurement yourself (SC-004)
+
+Note the clock time when you start and when the deployed CRUD probe succeeds; record both
+below under "Human run". Use only the generated project's AGENTS.md/README + `de --help`
+from step 4 onward — that's the metric.
+
+**0. Prerequisites (5 min, not counted):**
+- Docker running; `k3d`, `kubectl`, `helm`, `psql` on PATH.
+- Codegen toolchain: `buf`, `protoc-gen-go`, `protoc-gen-go-grpc`, `protoc-gen-grpc-gateway`
+  (`make generate` names anything missing, with the install command).
+- Build the new CLI (your installed `de` predates this feature; the running daemon is fine):
+  `cd ~/go/src/github.com/infobloxopen/devedge && make build` → use `./bin/de`.
+- `./bin/de doctor` to confirm the edge is healthy (`de start` if the daemon isn't running).
+
+**1. Scaffold** — `cd $(mktemp -d) && ~/go/src/github.com/infobloxopen/devedge/bin/de project init myhooks`
+Expect: a `myhooks/` directory and a printed next-steps block. (`'Bad Name'` is rejected;
+re-running on the same dir refuses — both worth 10 seconds to see.)
+
+**2. Generate + verify it builds clean** — `cd myhooks && make generate && make test`
+Expect: codegen into `internal/gen/`, then all tests pass with zero edits.
+
+**3. See the fail-closed gate once** (optional but recommended, 2 min): delete the
+`option (infoblox.authz.v1.rule) = …` line from one RPC in
+`proto/myhooks/v1/webhook_endpoint.proto`, run `make generate && make run` — the service
+refuses to start and names the method. Restore the line, regenerate.
+
+**4. Bring up the substrate** — `~/go/src/.../bin/de project up`
+Expect: cluster line (shared `devedge` cluster), Postgres provisioned, migration `v1`
+applied, a printed `DATABASE_URL=fsnotify://postgres/...` line, route registered.
+
+**5. Run it** — `export DATABASE_URL=…` (the printed value), then `make run`.
+Expect: `myhooks: serving gRPC on 127.0.0.1:9090, HTTP on :8080`.
+
+**6. CRUD over the dev hostname (separate terminal):**
+```bash
+curl -sk https://myhooks.dev.test/v1/webhook-endpoints \
+  -X POST -d '{"url":"https://example.test/h","secret":"s1","event_filters":["created"]}'
+curl -sk https://myhooks.dev.test/v1/webhook-endpoints          # list shows it
+# deny probe: a non-granted subject is rejected (403)
+curl -sk -o /dev/null -w '%{http_code}\n' \
+  -H 'Grpc-Metadata-x-dev-subject: intruder' https://myhooks.dev.test/v1/webhook-endpoints
+```
+
+**7. Deploy it** — stop `make run`, then `…/bin/de project up --deploy`
+Expect: image build from the scaffolded Dockerfile (first build downloads modules — the slow
+step), schema hook runs `migrate up` (no-op: already current), workload Ready; re-run the
+step-6 curls — same data, now served in-cluster.
+
+**8. Down** — `…/bin/de project down` (add `--clean` to also drop the data).
+
+**Record:** start time, end-of-step-7 time, and any step where you needed something not in
+AGENTS.md/README — that's a friction bug; file it against the scaffold templates.
+
+### Human run
+- _(date, who, duration, friction notes — fill in)_
