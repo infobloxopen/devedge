@@ -123,3 +123,10 @@ AGENTS.md/README — that's a friction bug; file it against the scaffold templat
   DEVEDGE_HOME — same idea), or daemon-side execs should set them explicitly. The split-
   brain (cluster ensure CLI-side as user, provisioning daemon-side as root) is the root
   design issue to revisit.
+- **2026-06-10, dgarcia — friction #4 (step 4, onion layer 4):** helm now works (postgres
+  installed!) but the port-forward failed: Rancher Desktop's kubectl is the **kuberlr
+  shim**, which downloads the real kubectl into `$HOME/.kuberlr` — the root daemon has no
+  HOME, so it hit `mkdir .kuberlr: read-only file system` at `/`. Workaround: add
+  `HOME=/var/root` to the plist env. Durable fix joins #2/#3: `de install` must provision
+  the daemon's full execution environment (PATH, KUBECONFIG, HOME), and `de doctor` must
+  validate the toolchain *from the daemon's vantage*, including shim-style kubectls.
