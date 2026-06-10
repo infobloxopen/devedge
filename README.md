@@ -358,6 +358,61 @@ spec:
       protocol: tcp
 ```
 
+### `de project init` — scaffold a new service
+
+`de project init NAME [--dir DIR] [--module MODULE]` generates a complete, ready-to-run service
+project in one step. `NAME` must be a lowercase DNS label (e.g. `webhooks`); it becomes the
+stable dev hostname, the Helm release name, and the default Go module base. The command refuses to
+write into a non-empty target directory.
+
+```bash
+de project init webhooks           # creates ./webhooks/
+de project init webhooks --dir ~/src/webhooks --module github.com/acme/webhooks
+```
+
+What gets generated:
+
+- **`devedge.yaml` (`kind: Service`)** — Postgres dependency with `migrations` declared and a
+  `spec.workload.build` block so `de project up --deploy` works out of the box.
+- **Proto definition** — one example resource (`WebhookEndpoint`) with a full CRUD RPC set.
+  Every RPC carries an `infoblox.authz.v1.rule` annotation so the authorization contract is
+  explicit in the proto, not scattered through implementation.
+- **Generated code** — gRPC server stubs and a REST/JSON gateway (run `make generate` after
+  init; the Makefile preflights the required tools — `buf`, `protoc-gen-go`,
+  `protoc-gen-go-grpc`, `protoc-gen-grpc-gateway` — and names anything missing).
+- **Fail-closed server** — the server checks at boot that every RPC in the service descriptor
+  has a declared authz rule; an undeclared method causes the process to refuse to start rather
+  than silently serve open.
+- **Initial migration** — `001_create_webhook_endpoints.up.sql` / `.down.sql` to bootstrap the
+  schema.
+- **Dockerfile** — multi-stage build that produces a `migrate` subcommand alongside the server
+  binary, satisfying the deploy hook contract (`de project up --deploy` runs `<image> migrate up`
+  before the Deployment rolls).
+- **`AGENTS.md` and `README.md`** — a rename checklist and a getting-started guide for the
+  scaffolded project.
+
+Generated projects depend only on released public modules (`github.com/infobloxopen/devedge-sdk`
+and the canonical authz annotation module `github.com/infoblox/authz-annotations`); no internal
+forks or replace directives are required.
+
+**The loop after init:**
+
+```bash
+cd webhooks
+make generate                        # regenerate proto; needs buf + protoc-gen-* on PATH
+de project up                        # provision Postgres, apply migration, register routes
+make run                             # start the server locally
+
+# CRUD over stable HTTPS:
+curl https://webhooks.dev.test/v1/webhook-endpoints
+curl -X POST https://webhooks.dev.test/v1/webhook-endpoints \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/hook"}'
+```
+
+For in-cluster: `de project up --deploy` (builds the image, loads it into the dev cluster, runs
+the migration Job, then rolls the Deployment).
+
 ### `Service` kind
 
 In addition to `kind: Config`, devedge understands `kind: Service` — a service-oriented

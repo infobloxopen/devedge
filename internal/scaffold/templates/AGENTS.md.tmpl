@@ -20,6 +20,11 @@ intentional and not a bug to work around.
 - `db/migrations/` — SQL migration files (numbered, up/down pairs).
 - `cmd/{{.Name}}/` — binary entrypoint.
 
+> Gotcha: the generated gateway function `Register...HandlerFromEndpoint` keeps its
+> `FromEndpoint` suffix — that means "from a gRPC endpoint address", not your resource.
+> Rename only the service part of the name (`RegisterNotesHandlerFromEndpoint`).
+
+
 ## Renaming the example resource
 
 The scaffold ships a `WebhookEndpoint` resource as a concrete, working example. To replace it

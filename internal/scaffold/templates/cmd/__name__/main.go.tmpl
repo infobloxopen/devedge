@@ -241,20 +241,26 @@ func resolveDSN(raw string) (string, error) {
 	return raw, nil
 }
 
-// toPgxURL rewrites a postgres DSN scheme for the migrate engine's pgx/v5
-// driver.
+// toPgxURL normalizes a postgres DSN for the migrate engine's pgx/v5 driver
+// (scheme "pgx5"), defaulting sslmode=disable when unset: dev/CI Postgres has
+// no TLS (port-forward locally, in-cluster Service DNS in deploy mode).
 func toPgxURL(dsn string) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return "", fmt.Errorf("parse DSN: %w", err)
 	}
 	switch u.Scheme {
-	case "postgres", "postgresql", "pgx5":
+	case "postgres", "postgresql", "pgx", "pgx5":
 		u.Scheme = "pgx5"
-		return u.String(), nil
 	default:
 		return "", fmt.Errorf("unsupported DSN scheme %q", u.Scheme)
 	}
+	q := u.Query()
+	if q.Get("sslmode") == "" {
+		q.Set("sslmode", "disable")
+		u.RawQuery = q.Encode()
+	}
+	return u.String(), nil
 }
 
 // migrationsDir prefers the in-image bundle (/migrations, see Dockerfile),

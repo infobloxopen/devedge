@@ -71,23 +71,23 @@ module `v1.0.0-alpha.2` released.
   `t.TempDir()` → `make generate` → `go build ./...` → `go test ./...` inside the generated
   project; assert zero manual edits needed (FR-003, SC-001). Skipped with `-short` (needs
   network for module downloads + buf plugins on PATH).
-- [ ] T011 [C] US2+US3+US4 The **walk-through e2e** (`test/e2e/scaffold_onboarding_test.go`,
+- [X] T011 [C] US2+US3+US4 The **walk-through e2e** (`test/e2e/scaffold_onboarding_test.go`,
   003–006 live-k3d harness style): init → scripted rename webhook_endpoint→note (sed-level, the
   US4 rename flow) → regenerate → `de project up` (deps + migrations) → start `serve` → HTTPS
   CRUD probe via the dev hostname (create + get round-trip through Postgres) + deny probe
   (DevAuthorizer deny path → permission-denied) → boot-gate probe (remove one annotation,
   regenerate, `serve` must refuse naming the method — SC-003) → `de project up --deploy` →
   CRUD probe again → `de project down`. This is FR-010/SC-002, the feature gate.
-- [ ] T012 [S] US4 Record the onboarding measurement (SC-004): run the walk-through guided only
+- [X] T012 [S] US4 Record the onboarding measurement (SC-004): run the walk-through guided only
   by the generated AGENTS.md; capture duration + friction notes in
   `specs/007-service-scaffold-onboarding/WALKTHROUGH.md`.
 
 ## Phase 5: QA & Documentation
 
-- [ ] T013 [S] Regression: full existing suites green (`go test ./...`, integration, 003–006
+- [X] T013 [S] Regression: full existing suites green (`go test ./...`, integration, 003–006
   e2es as available locally) + `dk` regression contract untouched (SC-005). `/verify-change`
   functional + scope gates.
-- [ ] T014 [S] Docs: README section for `de project init` (mirroring the `Service` kind section
+- [X] T014 [S] Docs: README section for `de project init` (mirroring the `Service` kind section
   style), CHANGELOG entry, CLAUDE.md note if conventions changed.
 
 
@@ -98,6 +98,18 @@ module `v1.0.0-alpha.2` released.
 - **T009 (escalation note, minor):** agent's fakeStore returned a gRPC status for missing ids instead of the `server.ErrNotFound` sentinel (contract landed after dispatch) — 2 generated-project tests failed; fixed in the template ([S] held, one-line fix).
 - **Layout deviation from plan:** vendored protos live under `third_party/proto/` as a second buf module (proven devedge-sdk Phase-B pattern) rather than plan's flat `third_party/google/api`; gateway+gRPC muxed via separate ports (gateway :8080 routed by devedge, gRPC 127.0.0.1:9090) rather than single-port cmux — simpler, same observable contract.
 - **T010 (2026-06-10):** automated smoke green in 6.6s — init → make generate → build → tests, plus boot-gate positive (gate passes → fails only on missing DATABASE_URL) and negative (annotation removed → "refusing to start … DeleteWebhookEndpoint"). SC-001 ✓ SC-003 ✓.
+- **T011 (2026-06-10): walk-through e2e GREEN in 75.9s** (warm image cache; ~6.5min cold). Iterations that
+  hardened the templates en route: rename gotcha (gateway `HandlerFromEndpoint` suffix — guarded + documented),
+  readiness-poll test bug, `sslmode=disable` default in the scaffolded migrate (pgx5 vs no-TLS dev postgres),
+  one-binding-one-password (deploy Secret must share the reconcile binding). Hook logs captured via a sidecar
+  watcher — pod logs beat inference.
+- **T012:** WALKTHROUGH.md records the scripted timings + agent-run SC-004 evidence + the friction log; first
+  human run still to be scheduled.
+- **T013 (2026-06-10):** vet clean; `go test ./...` all green (incl. scaffold suite + smoke); dk regression
+  contract explicitly green (`TestDKRouteSurfaceUnchanged`, `TestDKConfigKindStillParses`). Diff touches only
+  cmd/de (new command + one AddCommand line), internal/scaffold (new), tests, docs — no daemon/reconciler/chart/
+  dk surfaces (scope gate ✓).
+- **T014:** README `de project init` section + CHANGELOG entry.
 
 ## Dependencies & Order
 
