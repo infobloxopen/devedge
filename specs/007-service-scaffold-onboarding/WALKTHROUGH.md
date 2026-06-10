@@ -130,3 +130,11 @@ AGENTS.md/README — that's a friction bug; file it against the scaffold templat
   `HOME=/var/root` to the plist env. Durable fix joins #2/#3: `de install` must provision
   the daemon's full execution environment (PATH, KUBECONFIG, HOME), and `de doctor` must
   validate the toolchain *from the daemon's vantage*, including shim-style kubectls.
+- **2026-06-10, dgarcia — friction #5 (step 4, onion layer 5):** with HOME fixed, kuberlr
+  began downloading the real kubectl (57 MB) but devedge's port-forward establishment
+  timeout (~20s) killed it at 89% — and kuberlr doesn't resume, so every retry loses the
+  same race. Workaround: pre-warm once as root (`sudo env HOME=/var/root ... kubectl get
+  nodes`), then `up`. Durable fixes: (a) **use client-go for port-forwards instead of
+  exec'ing kubectl** (kills the kubectl/kuberlr dependency entirely — Constitution IV,
+  portable core); (b) failing that, make the establishment timeout first-run-aware or
+  configurable; (c) `de doctor` pre-warms shim kubectls from the daemon's vantage.
