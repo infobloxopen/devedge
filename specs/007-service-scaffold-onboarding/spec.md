@@ -22,6 +22,19 @@ scaffold → declare resource + authz in proto → generate → `up` → CRUD ov
 generated CRUD bodies, no AIP semantics beyond a plain REST mapping, no security-check tool;
 those are later framework features, earned from what this walk-through teaches.
 
+## Clarifications
+
+### Session 2026-06-10
+
+- Q: What is the scaffold command? → A: **`de project init <name>`** — the project lifecycle
+  starts under the same `de project` family it continues in (`up`/`down`/`chart`/`ci`).
+- Q: REST mapping technology for CRUD-over-HTTPS? → A: **grpc-gateway** — the vision's settled
+  Tier-1 default (gRPC + grpc-gateway); the scaffold carries the gateway generator from day one
+  so the walk-through proves the real target shape.
+- Q: The example placeholder resource? → A: **Webhook endpoint** (URL, secret, event filters) —
+  seeds toward the vision's flagship pentest service (Webhook Endpoint Registry) and surfaces the
+  secret-field handling question early; still designed to be renamed.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Scaffold a new service project (Priority: P1) 🎯 MVP
@@ -160,8 +173,7 @@ observed duration.
 
 ### Functional Requirements
 
-- **FR-001**: devedge MUST provide a scaffold command that, given a service name (and optional
-  target directory), generates a complete new service project with no placeholder left
+- **FR-001**: devedge MUST provide `de project init <name>` (optional target directory) which, generates a complete new service project with no placeholder left
   unbuildable: devedge Service config, annotated proto, generation config, server entrypoint,
   initial migration, containerfile, AGENTS.md, and project README.
 - **FR-002**: Every RPC in the scaffolded proto MUST carry a canonical `infoblox.authz.v1.rule`
@@ -203,7 +215,8 @@ observed duration.
 - **Scaffold template**: the versioned-in-devedge source shape from which projects are generated
   (files + substitutions). Owned by devedge (Layer 1); contains no framework runtime logic
   beyond wiring to the SDK.
-- **Example resource**: the single placeholder resource (one message, CRUD RPCs, one table) whose
+- **Example resource**: the webhook-endpoint placeholder (URL, secret, event filters — one
+  message, CRUD RPCs, one table) whose
   purpose is to be renamed; its only contract is that every RPC is authz-annotated and its
   storage round-trips through the provisioned database.
 - **Walk-through e2e**: the automated end-to-end run of the onboarding path; the feature's gate
