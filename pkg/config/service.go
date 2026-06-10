@@ -271,6 +271,13 @@ func (d Dependency) DefaultedPort() int {
 // rejects paths that escape the project tree (relative segment starts with ".."),
 // and checks that the resolved path exists. Returns the absolute path or an error.
 func resolveMigrationPath(projectDir, rel, field, depName string) (string, error) {
+	// The resolved path crosses a process boundary (CLI -> daemon, different
+	// cwd), so it MUST be absolute. With the default `-f devedge.yaml`,
+	// projectDir arrives as "." — anchor it to the CLI's cwd first.
+	projectDir, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("service config: resolve project dir: %w", err)
+	}
 	abs := filepath.Join(projectDir, rel)
 	// Reject paths that escape projectDir.
 	relCheck, err := filepath.Rel(projectDir, abs)

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -234,7 +235,6 @@ func TestParseService_dependency_port_out_of_range(t *testing.T) {
 	}
 }
 
-
 func TestParseService_missing_name(t *testing.T) {
 	input := []byte(`
 apiVersion: devedge.infoblox.dev/v1alpha1
@@ -270,12 +270,12 @@ func TestParseService_hostname(t *testing.T) {
 		hostname string
 		wantErr  bool
 	}{
-		"valid":             {"webhooks.dev.test", false},
-		"valid single":      {"webhooks", false},
-		"empty":             {"", true},
-		"leading hyphen":    {"-bad.dev.test", true},
+		"valid":              {"webhooks.dev.test", false},
+		"valid single":       {"webhooks", false},
+		"empty":              {"", true},
+		"leading hyphen":     {"-bad.dev.test", true},
 		"trailing dot-label": {"bad..dev.test", true},
-		"space":             {"bad host.dev.test", true},
+		"space":              {"bad host.dev.test", true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -666,5 +666,46 @@ func TestServiceMigrations_noDeclaredDepsExcluded(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected empty slice, got %d entries", len(results))
+	}
+}
+
+// Regression for the onboarding walk-through's friction #6 (007): with the
+// default `-f devedge.yaml`, the project dir arrives as "." — the resolved
+// migrations path must STILL be absolute, because it crosses the CLI→daemon
+// process boundary where the daemon's cwd differs.
+func TestServiceMigrations_relativeProjectDirYieldsAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	migsDir := dir + "/db/migrations"
+	if err := os.MkdirAll(migsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(migsDir+"/001_init.up.sql", []byte("CREATE TABLE x();"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(migsDir+"/001_init.down.sql", []byte("DROP TABLE x;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run from the project dir with projectDir "." (what filepath.Dir of the
+	// default -f produces).
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd) //nolint:errcheck
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := makeServiceCfg("db", "postgres", "db/migrations", "")
+	got, err := cfg.Migrations(".")
+	if err != nil {
+		t.Fatalf("Migrations(.): %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(got))
+	}
+	if !filepath.IsAbs(got[0].Dir) {
+		t.Fatalf("resolved migrations dir must be absolute (crosses to the daemon), got %q", got[0].Dir)
 	}
 }
