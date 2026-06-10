@@ -138,3 +138,11 @@ AGENTS.md/README — that's a friction bug; file it against the scaffold templat
   exec'ing kubectl** (kills the kubectl/kuberlr dependency entirely — Constitution IV,
   portable core); (b) failing that, make the establishment timeout first-run-aware or
   configurable; (c) `de doctor` pre-warms shim kubectls from the daemon's vantage.
+- **2026-06-10, dgarcia — friction #6 (step 4, REAL 006 BUG):** with the toolchain fixed,
+  migrations failed daemon-side: `open db/migrations: no such file or directory`. Root
+  cause: `resolveMigrationPath` joins against `filepath.Dir(-f)` — with the default
+  `-f devedge.yaml` that's `"."`, producing a RELATIVE path that validates CLI-side (cwd =
+  project) and then fails in the daemon (cwd = /). The 006 e2es drive the reconciler
+  in-process with absolute paths, so this default-flag path was never exercised.
+  Workaround: `de project up -f "$PWD/devedge.yaml"`. Fix: make the project dir absolute
+  before resolution (one line) + a regression test pinning relative `-f`.
