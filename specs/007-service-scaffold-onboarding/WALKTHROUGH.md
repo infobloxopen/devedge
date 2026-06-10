@@ -94,3 +94,12 @@ AGENTS.md/README — that's a friction bug; file it against the scaffold templat
 
 ### Human run
 - _(date, who, duration, friction notes — fill in)_
+
+### Human run
+- **2026-06-10, dgarcia — friction #1 (step 4):** `de project up` failed with
+  `exec: "helm": executable file not found in $PATH` — but only *after* creating the
+  cluster and installing cert-manager (~40s). Cause: helm/kubectl ship via Rancher
+  Desktop (`~/.rd/bin`), absent from that terminal's PATH. Fixes to file: (a) preflight
+  helm/kubectl/k3d *before* cluster creation, with remediation in the message;
+  (b) `de doctor` should check the cluster toolchain. Workaround:
+  `export PATH="$HOME/.rd/bin:$PATH"`.
