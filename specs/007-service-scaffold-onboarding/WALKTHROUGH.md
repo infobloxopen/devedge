@@ -103,3 +103,14 @@ AGENTS.md/README — that's a friction bug; file it against the scaffold templat
   helm/kubectl/k3d *before* cluster creation, with remediation in the message;
   (b) `de doctor` should check the cluster toolchain. Workaround:
   `export PATH="$HOME/.rd/bin:$PATH"`.
+- **2026-06-10, dgarcia — friction #2 (step 4, deeper):** exporting PATH in the shell did
+  NOT fix it — dependency provisioning execs `helm` **inside the daemon**, and the
+  LaunchDaemon plist sets no PATH, so devedged runs with launchd's bare default
+  (`/usr/bin:/bin:/usr/sbin:/sbin`): every daemon-side tool exec was broken on this
+  machine, masked until now because the e2es run the provisioner in-process. Workaround:
+  `sudo plutil -insert EnvironmentVariables.PATH -string "<rd-bin>:<brew>:..." io.devedge.daemon.plist`
+  + reload. Durable fixes to file: (a) `de install` discovers tool locations and writes
+  PATH into the plist; (b) the daemon resolves helm/kubectl/k3d to absolute paths with an
+  actionable error naming *where* it looked; (c) `de doctor` asks the **daemon** to check
+  its toolchain (the shell's PATH is the wrong vantage point); (d) the error should say
+  the exec happened daemon-side.
