@@ -1,0 +1,19 @@
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: {{.Name}}
+spec:
+  dev:
+    hostname: {{.Name}}.dev.test
+  workload:
+    build:
+      context: .
+    port: 8080
+  dependencies:
+    - name: db
+      engine: postgres
+      port: 5432
+      migrations: db/migrations
+  routes:
+    - host: {{.Name}}.dev.test
+      upstream: http://127.0.0.1:8080

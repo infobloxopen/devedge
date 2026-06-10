@@ -1,0 +1,95 @@
+// Package store is the Postgres persistence for {{.Name}} (schema owned by
+// db/migrations; devedge applies it on `up` before the service serves).
+package store
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.Module}}/internal/server"
+	{{.ProtoPkg}}v1 "{{.Module}}/internal/gen/{{.ProtoPkg}}/v1"
+)
+
+// Postgres implements server.Store on a pgx pool.
+type Postgres struct {
+	pool *pgxpool.Pool
+}
+
+// NewPostgres wraps an existing pool.
+func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+var _ server.Store = (*Postgres)(nil)
+
+func (p *Postgres) Create(ctx context.Context, e *{{.ProtoPkg}}v1.WebhookEndpoint) error {
+	_, err := p.pool.Exec(ctx,
+		`INSERT INTO webhook_endpoints (id, url, secret, event_filters) VALUES ($1, $2, $3, $4)`,
+		e.GetId(), e.GetUrl(), e.GetSecret(), e.GetEventFilters())
+	return err
+}
+
+func (p *Postgres) Get(ctx context.Context, id string) (*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	row := p.pool.QueryRow(ctx,
+		`SELECT id, url, secret, event_filters FROM webhook_endpoints WHERE id = $1`, id)
+	return scanEndpoint(row)
+}
+
+func (p *Postgres) List(ctx context.Context) ([]*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT id, url, secret, event_filters FROM webhook_endpoints ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*{{.ProtoPkg}}v1.WebhookEndpoint
+	for rows.Next() {
+		e, err := scanEndpoint(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Update(ctx context.Context, e *{{.ProtoPkg}}v1.WebhookEndpoint) error {
+	tag, err := p.pool.Exec(ctx,
+		`UPDATE webhook_endpoints SET url = $2, secret = $3, event_filters = $4 WHERE id = $1`,
+		e.GetId(), e.GetUrl(), e.GetSecret(), e.GetEventFilters())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return server.ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) Delete(ctx context.Context, id string) error {
+	tag, err := p.pool.Exec(ctx, `DELETE FROM webhook_endpoints WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return server.ErrNotFound
+	}
+	return nil
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanEndpoint(r rowScanner) (*{{.ProtoPkg}}v1.WebhookEndpoint, error) {
+	var e {{.ProtoPkg}}v1.WebhookEndpoint
+	if err := r.Scan(&e.Id, &e.Url, &e.Secret, &e.EventFilters); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, server.ErrNotFound
+		}
+		return nil, err
+	}
+	return &e, nil
+}

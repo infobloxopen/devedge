@@ -1,0 +1,330 @@
+// {{.Name}} — scaffolded by `de project init`.
+//
+// Subcommands:
+//
+//	serve        run the service: gRPC (GRPC_ADDR, default 127.0.0.1:9090)
+//	             behind a fail-closed authz interceptor, with the REST
+//	             gateway on HTTP_ADDR (default :8080) — the port devedge
+//	             routes the dev hostname to.
+//	migrate up   converge the database schema to this build's bundled
+//	             migrations (devedge's deploy hook runs this before the
+//	             workload serves; local `de project up` applies migrations
+//	             for you, so you rarely run it by hand).
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+
+	migratelib "github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/infobloxopen/devedge-sdk/authz"
+	"github.com/infobloxopen/devedge-sdk/authz/authzpb"
+	"github.com/infobloxopen/devedge-sdk/authz/grpcauthz"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+
+	{{.ProtoPkg}}v1 "{{.Module}}/internal/gen/{{.ProtoPkg}}/v1"
+	"{{.Module}}/internal/server"
+	"{{.Module}}/internal/store"
+)
+
+func main() {
+	cmd := "serve"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+	var err error
+	switch cmd {
+	case "serve":
+		err = serve()
+	case "migrate":
+		err = migrateCmd(os.Args[2:])
+	default:
+		err = fmt.Errorf("unknown command %q (want: serve | migrate up)", cmd)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
+
+func serve() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Authorization first — before any I/O: every RPC's requirement is
+	// declared in the proto ((infoblox.authz.v1.rule)); the extractor reads
+	// them off the compiled descriptors, the interceptor enforces them
+	// fail-closed, and this boot gate refuses to start if any method is
+	// undeclared (try removing an annotation and re-running).
+	rules := authzpb.RulesFromGlobal()
+	authzOpts := []grpcauthz.Option{
+		grpcauthz.WithRules(rules...),
+		grpcauthz.WithAuthorizer(devAuthorizer()),
+		grpcauthz.WithPrincipalFunc(principalFromMetadata),
+	}
+	if err := grpcauthz.AssertMethodsDeclared(serviceMethods(), authzOpts...); err != nil {
+		return fmt.Errorf("refusing to start: %w", err)
+	}
+
+	dsn, err := resolveDSN(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return err
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	defer pool.Close()
+
+	grpcAddr := envOr("GRPC_ADDR", "127.0.0.1:9090")
+	httpAddr := envOr("HTTP_ADDR", ":8080")
+
+	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(
+		grpcauthz.UnaryServerInterceptor("{{.Name}}", authzOpts...)))
+	{{.ProtoPkg}}v1.RegisterWebhookEndpointsServer(grpcServer, server.New(store.NewPostgres(pool)))
+
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", grpcAddr, err)
+	}
+	go func() {
+		<-ctx.Done()
+		grpcServer.GracefulStop()
+	}()
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil {
+			fmt.Fprintln(os.Stderr, "grpc serve:", err)
+		}
+	}()
+
+	// REST gateway: proxies to the gRPC server so the authz interceptor
+	// governs both surfaces identically.
+	mux := runtime.NewServeMux()
+	if err := {{.ProtoPkg}}v1.RegisterWebhookEndpointsHandlerFromEndpoint(ctx, mux, grpcAddr,
+		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}); err != nil {
+		return fmt.Errorf("register gateway: %w", err)
+	}
+	httpServer := &http.Server{Addr: httpAddr, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		_ = httpServer.Shutdown(context.Background())
+	}()
+
+	fmt.Printf("{{.Name}}: serving gRPC on %s, HTTP on %s\n", grpcAddr, httpAddr)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// serviceMethods lists every full method of the service for the boot gate.
+func serviceMethods() []string {
+	desc := {{.ProtoPkg}}v1.WebhookEndpoints_ServiceDesc
+	out := make([]string, 0, len(desc.Methods))
+	for _, m := range desc.Methods {
+		out = append(out, "/"+desc.ServiceName+"/"+m.MethodName)
+	}
+	return out
+}
+
+// devAuthorizer is the development decision point: subject "dev" may do
+// anything; everyone else is denied. Real deployments swap this for a
+// production Authorizer (e.g. the internal sidecar-OPA adapter) by
+// configuration — service code does not change.
+func devAuthorizer() authz.Authorizer {
+	return authz.NewDevAuthorizer(authz.Grant{
+		Tenant:   "*",
+		Subjects: []string{"dev"},
+		Verbs:    []authz.Verb{"*"},
+		Resource: "*",
+	})
+}
+
+// principalFromMetadata derives the caller from gRPC metadata. Dev-only:
+// the subject comes from the x-dev-subject header (REST callers send
+// Grpc-Metadata-X-Dev-Subject) and defaults to "dev".
+func principalFromMetadata(ctx context.Context) (authz.Principal, error) {
+	subject := "dev"
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if v := md.Get("x-dev-subject"); len(v) > 0 && v[0] != "" {
+			subject = v[0]
+		}
+	}
+	return authz.Principal{Subject: subject, Tenant: "dev"}, nil
+}
+
+// migrateCmd implements the devedge deploy-hook contract (006 C2):
+// `<image> migrate up` with DATABASE_URL set converges the schema to this
+// build's bundled migrations — up or down by the relative version — using
+// the persisted down-store at DEVEDGE_DOWNSTORE so rollbacks survive images
+// that no longer ship the down files.
+func migrateCmd(args []string) error {
+	if len(args) != 1 || args[0] != "up" {
+		return fmt.Errorf("usage: migrate up")
+	}
+	dsn, err := resolveDSN(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return err
+	}
+	dbURL, err := toPgxURL(dsn)
+	if err != nil {
+		return err
+	}
+
+	src := migrationsDir()
+	storeDir := envOr("DEVEDGE_DOWNSTORE", ".downstore")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		return fmt.Errorf("prepare down-store %s: %w", storeDir, err)
+	}
+	// The store is the migration source: copy this build's files in
+	// additively so it holds the union of every version ever applied.
+	if err := copyMigrations(src, storeDir); err != nil {
+		return err
+	}
+	target, err := maxVersion(src)
+	if err != nil {
+		return err
+	}
+
+	m, err := migratelib.New("file://"+filepath.ToSlash(storeDir), dbURL)
+	if err != nil {
+		return fmt.Errorf("open migrator: %w", err)
+	}
+	defer m.Close()
+	if err := m.WithDirtyStateConfig(storeDir, storeDir, true); err != nil {
+		return fmt.Errorf("enable dirty-state recovery: %w", err)
+	}
+	if err := m.Migrate(target); err != nil {
+		if errors.Is(err, migratelib.ErrNoChange) {
+			fmt.Println("schema already current")
+			return nil
+		}
+		return fmt.Errorf("migrate to %d: %w", target, err)
+	}
+	fmt.Printf("schema migrated to version %d\n", target)
+	return nil
+}
+
+// resolveDSN handles devedge's indirect DSN convention: a value of the form
+// fsnotify://<engine>/<path> means "the real DSN lives in that file" (local
+// `de project up`); anything else is used as-is (in-cluster Secret).
+func resolveDSN(raw string) (string, error) {
+	if raw == "" {
+		return "", fmt.Errorf("DATABASE_URL is not set (run `de project up` and export the value it prints)")
+	}
+	if rest, ok := strings.CutPrefix(raw, "fsnotify://"); ok {
+		_, path, found := strings.Cut(rest, "/")
+		if !found {
+			return "", fmt.Errorf("malformed indirect DSN %q", raw)
+		}
+		b, err := os.ReadFile("/" + path)
+		if err != nil {
+			return "", fmt.Errorf("read DSN file: %w", err)
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	return raw, nil
+}
+
+// toPgxURL normalizes a postgres DSN for the migrate engine's pgx/v5 driver
+// (scheme "pgx5"), defaulting sslmode=disable when unset: dev/CI Postgres has
+// no TLS (port-forward locally, in-cluster Service DNS in deploy mode).
+func toPgxURL(dsn string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse DSN: %w", err)
+	}
+	switch u.Scheme {
+	case "postgres", "postgresql", "pgx", "pgx5":
+		u.Scheme = "pgx5"
+	default:
+		return "", fmt.Errorf("unsupported DSN scheme %q", u.Scheme)
+	}
+	q := u.Query()
+	if q.Get("sslmode") == "" {
+		q.Set("sslmode", "disable")
+		u.RawQuery = q.Encode()
+	}
+	return u.String(), nil
+}
+
+// migrationsDir prefers the in-image bundle (/migrations, see Dockerfile),
+// falling back to the source tree for local runs. MIGRATIONS_DIR overrides.
+func migrationsDir() string {
+	if v := os.Getenv("MIGRATIONS_DIR"); v != "" {
+		return v
+	}
+	if st, err := os.Stat("/migrations"); err == nil && st.IsDir() {
+		return "/migrations"
+	}
+	return "db/migrations"
+}
+
+func copyMigrations(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return fmt.Errorf("read migrations dir %s: %w", src, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), b, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// maxVersion finds the highest NNN prefix among NNN_name.up.sql files.
+func maxVersion(dir string) (uint, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("read migrations dir %s: %w", dir, err)
+	}
+	var max uint
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".up.sql") {
+			continue
+		}
+		numPart, _, found := strings.Cut(name, "_")
+		if !found {
+			continue
+		}
+		var v uint
+		if _, err := fmt.Sscanf(numPart, "%d", &v); err == nil && v > max {
+			max = v
+		}
+	}
+	if max == 0 {
+		return 0, fmt.Errorf("no NNN_name.up.sql migrations found in %s", dir)
+	}
+	return max, nil
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}

@@ -8,6 +8,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+#### Service scaffold (007-service-scaffold-onboarding)
+
+- **`de project init NAME [--dir DIR] [--module MODULE]`**: scaffolds a complete
+  authz-governed service project in one command. Generates a `kind: Service` devedge config
+  (Postgres dependency + migrations declared), a proto with one example resource where every
+  RPC carries an `infoblox.authz.v1.rule` annotation, generated gRPC + REST gateway code, a
+  fail-closed server (boot-time gate: an undeclared method refuses to start), an initial
+  migration, and a Dockerfile that satisfies the deploy hook's `migrate up` subcommand
+  contract. `NAME` must be a lowercase DNS label; init refuses to overwrite a non-empty
+  target. Generated projects depend only on released public modules (devedge-sdk, the
+  canonical authz annotation module). The onboarding walk-through — scaffold → `make
+  generate` → `de project up` → CRUD over `https://NAME.dev.test/v1/webhook-endpoints` →
+  `de project up --deploy` — ships as an automated e2e.
+
 #### Schema migrations and dev seed (006-storage-migrations-seed)
 
 - **`migrations` and `seed` on a postgres dependency**: optional additive fields on a `postgres`

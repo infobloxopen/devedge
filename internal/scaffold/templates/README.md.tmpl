@@ -1,0 +1,73 @@
+# {{.Name}}
+
+This project was scaffolded by `de project init`. It ships a working CRUD service
+(webhook endpoints) as a starting point — see AGENTS.md for the rename flow to turn
+it into your own resource.
+
+## Prerequisites
+
+- **Go {{.GoVersion}}+**
+- **buf** — `go install github.com/bufbuild/buf/cmd/buf@latest`
+- **protoc-gen-go** — `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`
+- **protoc-gen-go-grpc** — `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`
+- **protoc-gen-grpc-gateway** — `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest`
+- **devedge** running locally (`de cluster start` if not already up)
+
+## Development loop
+
+```sh
+# 1. Regenerate gRPC + gateway code after editing the proto
+make generate
+
+# 2. Bring up the service (postgres dependency included)
+de project up
+
+# 3. Run the server
+make run
+
+# 4. Exercise the REST API (see below)
+```
+
+## REST API examples
+
+The gateway is reachable at `https://{{.Name}}.dev.test`.
+
+Requests carry an optional subject header `Grpc-Metadata-x-dev-subject`.
+The default subject (`dev`) is granted all permissions. Any other subject
+is denied by the dev authorizer unless you extend the policy.
+
+```sh
+# Create
+curl -s -X POST https://{{.Name}}.dev.test/v1/webhook-endpoints \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/hook","secret":"s3cr3t","event_filters":["created","deleted"]}'
+
+# List
+curl -s https://{{.Name}}.dev.test/v1/webhook-endpoints
+
+# Get
+curl -s https://{{.Name}}.dev.test/v1/webhook-endpoints/{id}
+
+# Update
+curl -s -X PUT https://{{.Name}}.dev.test/v1/webhook-endpoints/{endpoint.id} \
+  -H "Content-Type: application/json" \
+  -d '{"id":"{id}","url":"https://example.com/hook2","secret":"s3cr3t","event_filters":["created"]}'
+
+# Delete
+curl -s -X DELETE https://{{.Name}}.dev.test/v1/webhook-endpoints/{id}
+
+# Use a different subject (will be denied by default)
+curl -s https://{{.Name}}.dev.test/v1/webhook-endpoints \
+  -H "Grpc-Metadata-x-dev-subject: alice"
+```
+
+## Deploy to dev cluster
+
+```sh
+de project up --deploy
+```
+
+## Renaming the resource
+
+See **AGENTS.md** for the step-by-step rename flow (find/replace proto, regenerate,
+update server + store, update tests).
