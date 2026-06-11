@@ -669,6 +669,121 @@ func TestServiceMigrations_noDeclaredDepsExcluded(t *testing.T) {
 	}
 }
 
+// T002 (feature 010): readiness block validation in ParseService.
+// Cases 1–6 are intentionally RED until T005 adds validation logic to
+// ServiceConfig.Validate(). Cases 7–9 must pass immediately (no false
+// positives from a missing-but-not-yet-written validator).
+func TestParseService_ReadinessValidation(t *testing.T) {
+	// baseYAML is a complete valid Service document; the readiness block is
+	// injected per-test by replacing the placeholder below.
+	const baseWithReadiness = `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: testsvc
+spec:
+  dev:
+    hostname: testsvc.dev.local
+  routes:
+    - host: testsvc.dev.local
+      upstream: localhost:8080
+      readiness:
+        %s`
+
+	const baseNoReadiness = `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: testsvc
+spec:
+  dev:
+    hostname: testsvc.dev.local
+  routes:
+    - host: testsvc.dev.local
+      upstream: localhost:8080
+`
+
+	cases := []struct {
+		name        string
+		yaml        string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "empty path",
+			yaml:        fmt.Sprintf(baseWithReadiness, "path: \"\""),
+			wantErr:     true,
+			errContains: "readiness.path",
+		},
+		{
+			name:        "path without leading slash",
+			yaml:        fmt.Sprintf(baseWithReadiness, "path: healthz"),
+			wantErr:     true,
+			errContains: "readiness.path",
+		},
+		{
+			name: "invalid timeout duration",
+			yaml: fmt.Sprintf(baseWithReadiness,
+				"path: /healthz\n        timeout: notaduration"),
+			wantErr:     true,
+			errContains: "readiness.timeout",
+		},
+		{
+			name: "negative timeout",
+			yaml: fmt.Sprintf(baseWithReadiness,
+				"path: /healthz\n        timeout: \"-5s\""),
+			wantErr:     true,
+			errContains: "readiness.timeout",
+		},
+		{
+			name: "invalid interval duration",
+			yaml: fmt.Sprintf(baseWithReadiness,
+				"path: /healthz\n        interval: notaduration"),
+			wantErr:     true,
+			errContains: "readiness.interval",
+		},
+		{
+			name: "interval longer than timeout",
+			yaml: fmt.Sprintf(baseWithReadiness,
+				"path: /healthz\n        timeout: 100ms\n        interval: 1s"),
+			wantErr:     true,
+			errContains: "readiness",
+		},
+		{
+			name: "valid block with all fields",
+			yaml: fmt.Sprintf(baseWithReadiness,
+				"path: /healthz\n        timeout: 30s\n        interval: 500ms"),
+			wantErr: false,
+		},
+		{
+			name:    "valid block path only",
+			yaml:    fmt.Sprintf(baseWithReadiness, "path: /healthz"),
+			wantErr: false,
+		},
+		{
+			name:    "no readiness block",
+			yaml:    baseNoReadiness,
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseService([]byte(tc.yaml))
+			if tc.wantErr && err == nil {
+				t.Errorf("expected error (containing %q) but got nil", tc.errContains)
+				return
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("expected no error but got: %v", err)
+				return
+			}
+			if tc.wantErr && tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
+			}
+		})
+	}
+}
+
 // Regression for the onboarding walk-through's friction #6 (007): with the
 // default `-f devedge.yaml`, the project dir arrives as "." — the resolved
 // migrations path must STILL be absolute, because it crosses the CLI→daemon
