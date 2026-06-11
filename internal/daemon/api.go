@@ -6,12 +6,29 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
 
 	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/pkg/types"
 )
+
+// ToolInfo describes one tool in the daemon's toolchain check.
+type ToolInfo struct {
+	Name  string `json:"name"`
+	Found bool   `json:"found"`
+	Path  string `json:"path,omitempty"` // absolute path when Found
+}
+
+// ToolchainResponse is the body returned by GET /v1/doctor/toolchain. It
+// reports the tools the daemon can resolve and the PATH it searched, so
+// callers can see the daemon's execution environment (not the shell's).
+type ToolchainResponse struct {
+	Tools        []ToolInfo `json:"tools"`
+	PathSearched string     `json:"path_searched"`
+}
 
 // API exposes the route registry over HTTP.
 type API struct {
@@ -36,8 +53,31 @@ func NewAPI(reg *registry.Registry, deps *DepManager, logger *slog.Logger) *API 
 	a.mux.HandleFunc("PUT /v1/services/{service}/dependencies", a.applyDependencies)
 	a.mux.HandleFunc("GET /v1/services/{service}/dependencies", a.getDependencies)
 	a.mux.HandleFunc("DELETE /v1/services/{service}/dependencies", a.releaseDependencies)
+	// Doctor: toolchain check from the daemon's vantage (sees the daemon's real PATH/HOME).
+	a.mux.HandleFunc("GET /v1/doctor/toolchain", a.toolchainCheck)
 	addUIRoutes(a.mux, reg)
 	return a
+}
+
+// toolchainCheck runs exec.LookPath for each cluster tool using the daemon's
+// runtime PATH (not the invoking shell's PATH). This is the canonical way to
+// know whether the daemon can actually exec helm/kubectl/k3d.
+func (a *API) toolchainCheck(w http.ResponseWriter, r *http.Request) {
+	tools := []string{"helm", "kubectl", "k3d", "mkcert"}
+	resp := ToolchainResponse{
+		PathSearched: os.Getenv("PATH"),
+		Tools:        make([]ToolInfo, 0, len(tools)),
+	}
+	for _, name := range tools {
+		info := ToolInfo{Name: name}
+		if p, err := exec.LookPath(name); err == nil {
+			info.Found = true
+			info.Path = p
+		}
+		resp.Tools = append(resp.Tools, info)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
 
 // DependencyRequest is one declared dependency in an ApplyRequest.

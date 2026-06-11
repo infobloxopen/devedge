@@ -9,6 +9,45 @@ import (
 	"text/template"
 )
 
+// clusterTools are the CLI tools the daemon uses for cluster operations.
+var clusterTools = []string{"helm", "kubectl", "k3d", "mkcert"}
+
+// discoverToolEnv discovers the directories containing each required tool in
+// the current PATH, builds a colon-joined PATH value that the daemon plist
+// should carry, and returns a warnings string listing any tools not found.
+// Falls back to a static minimal PATH when a tool's directory cannot be found.
+// home and kubeconfig are passed through for the caller's use.
+func discoverToolEnv(home, kubeconfig string) (toolPath, warnings string) {
+	const fallback = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	seen := make(map[string]struct{})
+	dirs := []string{}
+	var missing []string
+	for _, t := range clusterTools {
+		p, err := exec.LookPath(t)
+		if err != nil {
+			missing = append(missing, t)
+			continue
+		}
+		d := filepath.Dir(p)
+		if _, ok := seen[d]; !ok {
+			seen[d] = struct{}{}
+			dirs = append(dirs, d)
+		}
+	}
+	// Build PATH: discovered tool dirs first, then the static fallback dirs.
+	for _, d := range strings.Split(fallback, ":") {
+		if _, ok := seen[d]; !ok {
+			seen[d] = struct{}{}
+			dirs = append(dirs, d)
+		}
+	}
+	toolPath = strings.Join(dirs, ":")
+	if len(missing) > 0 {
+		warnings = strings.Join(missing, ", ")
+	}
+	return toolPath, warnings
+}
+
 const launchDaemonLabel = "io.devedge.daemon"
 
 // launchDaemonPath is the system-level plist location (runs as root).
@@ -36,16 +75,36 @@ func (d *DarwinAdapter) Install() error {
 		return err
 	}
 
-	home, _ := os.UserHomeDir()
+	// Resolve the invoking user's home dir. When called via `sudo de install`,
+	// SUDO_USER is the original user; fall back to os.UserHomeDir() otherwise.
+	home := invokerHome()
 	devedgeHome := filepath.Join(home, ".devedge")
 	logDir := filepath.Join(devedgeHome, "logs")
 	os.MkdirAll(logDir, 0755)
+
+	// Discover the kubeconfig path. Prefer $KUBECONFIG (the invoking user's
+	// shell env, available via sudo passthrough); fall back to the default.
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		kubeconfig = filepath.Join(home, ".kube", "config")
+	}
+
+	// Discover tool dirs from the invoking user's PATH; warn about missing tools
+	// (non-blocking — the daemon won't work until tools are installed, but the
+	// install itself should not fail for a missing tool).
+	toolPath, warnings := discoverToolEnv(home, kubeconfig)
+	if warnings != "" {
+		fmt.Printf("Warning: tools not found in PATH (daemon may fail until installed): %s\n", warnings)
+	}
 
 	data := plistData{
 		Label:       launchDaemonLabel,
 		BinPath:     binPath,
 		LogDir:      logDir,
 		DevedgeHome: devedgeHome,
+		ToolPATH:    toolPath,
+		Home:        home,
+		Kubeconfig:  kubeconfig,
 	}
 
 	var buf strings.Builder
@@ -63,6 +122,33 @@ func (d *DarwinAdapter) Install() error {
 	}
 
 	return nil
+}
+
+// invokerHome returns the home directory of the user who invoked the process.
+// Under `sudo de install` SUDO_USER is the original user; otherwise fall back
+// to os.UserHomeDir.
+func invokerHome() string {
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		// Construct the home path for common macOS and Linux layouts.
+		if strings.HasPrefix(sudoUser, "/") {
+			return sudoUser
+		}
+		if home := os.Getenv("SUDO_HOME"); home != "" {
+			return home
+		}
+		// macOS: /Users/<user>
+		macHome := filepath.Join("/Users", sudoUser)
+		if fileExists(macHome) {
+			return macHome
+		}
+		// Linux: /home/<user>
+		linuxHome := filepath.Join("/home", sudoUser)
+		if fileExists(linuxHome) {
+			return linuxHome
+		}
+	}
+	home, _ := os.UserHomeDir()
+	return home
 }
 
 func (d *DarwinAdapter) Uninstall() error {
@@ -111,6 +197,12 @@ type plistData struct {
 	BinPath     string
 	LogDir      string
 	DevedgeHome string
+	// ToolPATH, Home, Kubeconfig are written into EnvironmentVariables so the
+	// daemon (which runs under launchd with a bare PATH and no HOME) can find
+	// helm/kubectl/k3d/mkcert and read the user's kubeconfig (frictions #2–#4).
+	ToolPATH   string
+	Home       string
+	Kubeconfig string
 }
 
 var plistTmpl = template.Must(template.New("plist").Parse(`<?xml version="1.0" encoding="UTF-8"?>
@@ -127,6 +219,12 @@ var plistTmpl = template.Must(template.New("plist").Parse(`<?xml version="1.0" e
     <dict>
         <key>DEVEDGE_HOME</key>
         <string>{{.DevedgeHome}}</string>
+        <key>PATH</key>
+        <string>{{.ToolPATH}}</string>
+        <key>HOME</key>
+        <string>{{.Home}}</string>
+        <key>KUBECONFIG</key>
+        <string>{{.Kubeconfig}}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>

@@ -288,6 +288,12 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 			// Engaged only when a Service declares dependencies — kind: Config and
 			// no-deps Services are unaffected (FR-013) and skip cluster ensure.
 			if dd, ok := res.(config.DependencyDeclarer); ok && len(dd.Dependencies()) > 0 {
+				// Preflight: all cluster tools must be present before any cluster
+				// work begins (friction #1 from 007 walk-through). Fail fast here
+				// so no cluster time is wasted on a missing helm/kubectl/k3d.
+				if err := requireDependencyTools(); err != nil {
+					return err
+				}
 				// Ensure the resolved cluster exists + is bootstrapped before
 				// provisioning. A failure exits non-zero with an actionable,
 				// retryable message and leaves no half-created cluster (FR-002/011/012).
