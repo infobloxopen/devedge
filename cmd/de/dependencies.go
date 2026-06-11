@@ -16,10 +16,6 @@ import (
 // cause a non-zero exit, but the daemon leaves nothing half-provisioned that
 // blocks a retry (FR-009).
 func provisionDependencies(c *client.Client, service string, deps []config.Dependency, migs []config.DependencyMigrations, env cluster.Environment, target cluster.ClusterTarget) error {
-	if err := requireDependencyTools(); err != nil {
-		return err
-	}
-
 	// Resolved (absolute) migration/seed sources, by dependency name (006).
 	migByDep := make(map[string]config.DependencyMigrations, len(migs))
 	for _, m := range migs {

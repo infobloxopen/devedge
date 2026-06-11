@@ -47,6 +47,17 @@ func (c *Client) Status(ctx context.Context) (map[string]any, error) {
 	return result, err
 }
 
+// GetToolchain returns the daemon's toolchain check: which tools the daemon can
+// find in its own PATH (not the shell's PATH). Returns nil on network error
+// (daemon not running).
+func (c *Client) GetToolchain(ctx context.Context) (*daemon.ToolchainResponse, error) {
+	var result daemon.ToolchainResponse
+	if err := c.get(ctx, "/v1/doctor/toolchain", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // List returns all active routes.
 func (c *Client) List(ctx context.Context) ([]types.Route, error) {
 	var routes []types.Route

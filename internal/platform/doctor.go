@@ -2,8 +2,10 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -32,6 +34,11 @@ var doctorDNSAddr = daemon.DefaultDNSAddr()
 // system-resolver probe. Overridable for tests.
 var doctorResolverFactory = func() *net.Resolver { return net.DefaultResolver }
 
+// doctorToolchainBaseURL is the base URL used by checkDaemonToolchain. Empty
+// string means "use the Unix domain socket at socketPath". Overridden in tests
+// to point at an httptest.Server.
+var doctorToolchainBaseURL = ""
+
 // RunDoctor performs a series of health checks and returns the results.
 func RunDoctor() []CheckResult {
 	var results []CheckResult
@@ -44,6 +51,7 @@ func RunDoctor() []CheckResult {
 	results = append(results, checkDNSEndpoint())
 	results = append(results, checkDNS())
 	results = append(results, checkResolverConfig())
+	results = append(results, checkDaemonToolchain(daemon.DefaultSocketPath())...)
 
 	return results
 }
@@ -184,4 +192,63 @@ func checkResolverConfig() CheckResult {
 		return CheckResult{"macOS resolver", true, "/etc/resolver/dev.test exists"}
 	}
 	return CheckResult{"macOS resolver", false, "not configured (optional)"}
+}
+
+// checkDaemonToolchain queries the daemon's GET /v1/doctor/toolchain endpoint
+// so the doctor validates the toolchain from the daemon's vantage (uses the
+// daemon's real PATH and HOME, not the shell's). socketPath is the Unix domain
+// socket; it is ignored when doctorToolchainBaseURL is overridden for tests.
+func checkDaemonToolchain(socketPath string) []CheckResult {
+	const timeout = 2 * time.Second
+
+	// Build an HTTP client: either a TCP client (tests) or a Unix-socket client (prod).
+	var httpClient *http.Client
+	baseURL := doctorToolchainBaseURL
+	if baseURL == "" {
+		baseURL = "http://devedge"
+		httpClient = &http.Client{
+			Timeout: timeout,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return net.DialTimeout("unix", socketPath, timeout)
+				},
+			},
+		}
+	} else {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", baseURL+"/v1/doctor/toolchain", nil)
+	if err != nil {
+		return []CheckResult{{"daemon toolchain", false, fmt.Sprintf("build request: %v", err)}}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return []CheckResult{{"daemon toolchain", true, "skipped (daemon offline)"}}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return []CheckResult{{"daemon toolchain", true, "skipped (old daemon — restart after `de install` to enable)"}}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return []CheckResult{{"daemon toolchain", false, fmt.Sprintf("unexpected status %d from daemon", resp.StatusCode)}}
+	}
+
+	var tc daemon.ToolchainResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tc); err != nil {
+		return []CheckResult{{"daemon toolchain", false, fmt.Sprintf("decode response: %v", err)}}
+	}
+
+	results := make([]CheckResult, 0, len(tc.Tools))
+	for _, tool := range tc.Tools {
+		name := "daemon tool: " + tool.Name
+		if tool.Found {
+			results = append(results, CheckResult{name, true, tool.Path})
+		} else {
+			results = append(results, CheckResult{name, false,
+				fmt.Sprintf("not found in daemon PATH=%s", tc.PathSearched)})
+		}
+	}
+	return results
 }

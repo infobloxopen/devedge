@@ -2,12 +2,16 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/infobloxopen/devedge/internal/daemon"
 	"github.com/infobloxopen/devedge/pkg/types"
 	mdns "github.com/miekg/dns"
 )
@@ -198,5 +202,94 @@ func TestCheckDNSEndpoint_Timeout(t *testing.T) {
 	_ = checkDNSEndpoint()
 	if elapsed := time.Since(start); elapsed > 750*time.Millisecond {
 		t.Errorf("probe took %v, expected under 750ms", elapsed)
+	}
+}
+
+// withToolchainURL overrides the toolchain endpoint base URL for a test.
+func withToolchainURL(t *testing.T, url string) {
+	t.Helper()
+	prev := doctorToolchainBaseURL
+	doctorToolchainBaseURL = url
+	t.Cleanup(func() { doctorToolchainBaseURL = prev })
+}
+
+func TestCheckDaemonToolchain_ToolsFound(t *testing.T) {
+	resp := daemon.ToolchainResponse{
+		Tools: []daemon.ToolInfo{
+			{Name: "helm", Found: true, Path: "/opt/homebrew/bin/helm"},
+			{Name: "kubectl", Found: true, Path: "/Users/u/.rd/bin/kubectl"},
+			{Name: "k3d", Found: true, Path: "/usr/local/bin/k3d"},
+		},
+		PathSearched: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/doctor/toolchain" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	withToolchainURL(t, srv.URL)
+
+	results := checkDaemonToolchain("")
+	if len(results) != 3 {
+		t.Fatalf("want 3 results, got %d: %v", len(results), results)
+	}
+	for _, r := range results {
+		if !r.Passed {
+			t.Errorf("result %q unexpectedly failed: %s", r.Name, r.Message)
+		}
+	}
+}
+
+func TestCheckDaemonToolchain_ToolMissing(t *testing.T) {
+	resp := daemon.ToolchainResponse{
+		Tools: []daemon.ToolInfo{
+			{Name: "helm", Found: true, Path: "/opt/homebrew/bin/helm"},
+			{Name: "kubectl", Found: false, Path: ""},
+		},
+		PathSearched: "/usr/bin:/bin",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	withToolchainURL(t, srv.URL)
+
+	results := checkDaemonToolchain("")
+	passed := 0
+	failed := 0
+	for _, r := range results {
+		if r.Passed {
+			passed++
+		} else {
+			failed++
+			if !strings.Contains(r.Message, "PATH=") {
+				t.Errorf("fail message %q must include PATH= to show searched path", r.Message)
+			}
+		}
+	}
+	if passed != 1 || failed != 1 {
+		t.Errorf("want 1 pass + 1 fail, got %d pass + %d fail", passed, failed)
+	}
+}
+
+func TestCheckDaemonToolchain_DaemonOffline(t *testing.T) {
+	// Point at a URL that refuses connections (no server running).
+	withToolchainURL(t, "http://127.0.0.1:1")
+
+	results := checkDaemonToolchain("")
+	if len(results) != 1 {
+		t.Fatalf("want 1 skipped result, got %d", len(results))
+	}
+	// offline is not a FAIL — it is expected when the daemon isn't running.
+	if !results[0].Passed {
+		t.Error("offline daemon should report Passed=true (skipped, not failed)")
+	}
+	if !strings.Contains(results[0].Message, "skipped") {
+		t.Errorf("message %q should mention 'skipped'", results[0].Message)
 	}
 }
