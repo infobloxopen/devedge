@@ -224,9 +224,16 @@ func checkDaemonToolchain(socketPath string) []CheckResult {
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return []CheckResult{{"daemon toolchain", false, "skipped (daemon offline)"}}
+		return []CheckResult{{"daemon toolchain", true, "skipped (daemon offline)"}}
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return []CheckResult{{"daemon toolchain", true, "skipped (old daemon — restart after `de install` to enable)"}}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return []CheckResult{{"daemon toolchain", false, fmt.Sprintf("unexpected status %d from daemon", resp.StatusCode)}}
+	}
 
 	var tc daemon.ToolchainResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tc); err != nil {

@@ -285,8 +285,9 @@ func TestCheckDaemonToolchain_DaemonOffline(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("want 1 skipped result, got %d", len(results))
 	}
-	if results[0].Passed {
-		t.Error("offline daemon should not report Passed")
+	// offline is not a FAIL — it is expected when the daemon isn't running.
+	if !results[0].Passed {
+		t.Error("offline daemon should report Passed=true (skipped, not failed)")
 	}
 	if !strings.Contains(results[0].Message, "skipped") {
 		t.Errorf("message %q should mention 'skipped'", results[0].Message)
