@@ -6,7 +6,7 @@
 
 ## Phase 1: Foundation — add config types (no behavior change yet)
 
-- [ ] T001 [S] Add `ReadinessSpec` struct and `Readiness *ReadinessSpec` field to `RouteEntry`
+- [X] T001 [S] Add `ReadinessSpec` struct and `Readiness *ReadinessSpec` field to `RouteEntry`
   in `pkg/config/project.go` (FR-001). `ReadinessSpec` fields: `Path string yaml:"path"`,
   `Timeout string yaml:"timeout,omitempty"`, `Interval string yaml:"interval,omitempty"`.
   No validation yet. Verify `go build ./...` passes and `go test ./pkg/config/...` is still
@@ -17,7 +17,7 @@
 
 ## Phase 2: Tests (write before implementation — must be red first)
 
-- [ ] T002 [S] [US3] Write table-driven validation tests in `pkg/config/service_test.go`
+- [X] T002 [S] [US3] Write table-driven validation tests in `pkg/config/service_test.go`
   covering every error branch added in T005:
   - readiness block present, `path: ""` → error names `readiness.path`
   - `path: "noslash"` (no leading `/`) → error names `readiness.path`
@@ -30,7 +30,7 @@
   - no readiness block → no error (backward compat, SC-002)
   These tests MUST fail before T005 is implemented.
 
-- [ ] T003 [S] [US1/US2] Create `internal/health/probe_test.go` with four unit tests using
+- [X] T003 [S] [US1/US2] Create `internal/health/probe_test.go` with four unit tests using
   `httptest.NewServer`:
   1. **Delayed 200**: server returns 503 for the first 3 calls then 200; prober with
      `Interval: 20ms`, `Timeout: 5s`; assert `Probe` returns `(true, nil)` and that at least
@@ -43,7 +43,7 @@
      `(true, nil)` and exactly 1 HTTP call was made.
   These tests MUST fail (package doesn't exist yet) before T006 is implemented.
 
-- [ ] T004 [S] [US4] Add a watch-mode probe-count test in `internal/health/probe_test.go`:
+- [X] T004 [S] [US4] Add a watch-mode probe-count test in `internal/health/probe_test.go`:
   Construct an `HTTPProber` with a counter client that returns 200 immediately. Call `Probe`
   once. Assert call count == 1. (Watch-mode enforcement — that heartbeats don't re-probe — is
   structural in the cmd layer; this test confirms one `Probe` call = one health request cycle.)
@@ -52,7 +52,7 @@
 
 ## Phase 3: Implementation
 
-- [ ] T005 [S] [US3] Add readiness validation to `ServiceConfig.Validate()` in
+- [X] T005 [S] [US3] Add readiness validation to `ServiceConfig.Validate()` in
   `pkg/config/service.go`. Iterate `c.Spec.Routes`; for each route `r` where
   `r.Readiness != nil`:
   - Reject if `r.Readiness.Path == ""` or does not start with `"/"`.
@@ -62,7 +62,7 @@
   Error messages MUST name the offending field as `spec.routes[N].readiness.<field>`.
   Run T002 tests — they must be green.
 
-- [ ] T006 [C] Implement `internal/health/probe.go`:
+- [X] T006 [C] Implement `internal/health/probe.go`:
   ```
   package health
 
@@ -93,7 +93,7 @@
     `time.After(0)` pre-probe) so there is no 500 ms delay on an already-healthy service.
   Run T003/T004 tests — they must be green.
 
-- [ ] T007 [S] [US1/US2/US4] Wire probe into `projectUpCmd()` in `cmd/de/main.go`. Insert a
+- [X] T007 [S] [US1/US2/US4] Wire probe into `projectUpCmd()` in `cmd/de/main.go`. Insert a
   new probe loop immediately before the register loop (lines ~332-346). Structure:
   ```go
   // Track which routes passed the readiness check (for output annotation).
@@ -152,12 +152,12 @@
 
 ## Phase 4: Verify
 
-- [ ] T008 [S] Run `go build ./...` and `go vet ./...` from the repo root; fix any issues.
+- [X] T008 [S] Run `go build ./...` and `go vet ./...` from the repo root; fix any issues.
 
-- [ ] T009 [S] Run all unit tests: `go test ./internal/health/... ./pkg/config/...`; T002,
+- [X] T009 [S] Run all unit tests: `go test ./internal/health/... ./pkg/config/...`; T002,
   T003, T004 must be green (SC-001, SC-003, SC-004, SC-006).
 
-- [ ] T010 [S] Run `make test-e2e`; all 5 existing k3d e2e tests must pass without any test
+- [X] T010 [S] Run `make test-e2e`; all 5 existing k3d e2e tests must pass without any test
   file modification (SC-002, SC-005). No `devedge.yaml` fixture in the e2e suite declares a
   `readiness` block, so the backward-compatible path (FR-002) is exercised implicitly.
 
@@ -165,7 +165,7 @@
 
 ## Phase 5: Commit
 
-- [ ] T011 [S] Commit all changes: spec + plan + tasks + `pkg/config/project.go` +
+- [X] T011 [S] Commit all changes: spec + plan + tasks + `pkg/config/project.go` +
   `pkg/config/service.go` + test files + `internal/health/` + `cmd/de/main.go`.
   Message: `010: health-gated route readiness — probe upstream before route registration`.
 
