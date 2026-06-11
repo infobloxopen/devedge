@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/infobloxopen/devedge/pkg/types"
 	"gopkg.in/yaml.v3"
@@ -210,6 +211,34 @@ func (c *ServiceConfig) Validate() error {
 		}
 		if d.Port < 1 || d.Port > 65535 {
 			return fmt.Errorf("service config: dependency %q has port %d out of range (must be 1-65535)", d.Name, d.Port)
+		}
+	}
+
+	for i, r := range c.Spec.Routes {
+		if r.Readiness == nil {
+			continue
+		}
+		rd := r.Readiness
+		if rd.Path == "" || rd.Path[0] != '/' {
+			return fmt.Errorf("service config: spec.routes[%d].readiness.path must be a non-empty path starting with '/' (got %q)", i, rd.Path)
+		}
+		var timeout, interval time.Duration
+		if rd.Timeout != "" {
+			d, err := time.ParseDuration(rd.Timeout)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("service config: spec.routes[%d].readiness.timeout %q is not a valid positive duration: %v", i, rd.Timeout, err)
+			}
+			timeout = d
+		}
+		if rd.Interval != "" {
+			d, err := time.ParseDuration(rd.Interval)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("service config: spec.routes[%d].readiness.interval %q is not a valid positive duration: %v", i, rd.Interval, err)
+			}
+			interval = d
+		}
+		if timeout > 0 && interval > 0 && timeout <= interval {
+			return fmt.Errorf("service config: spec.routes[%d].readiness: timeout (%s) must be greater than interval (%s)", i, timeout, interval)
 		}
 	}
 	return nil

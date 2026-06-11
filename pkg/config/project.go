@@ -60,13 +60,23 @@ type RouteDefaults struct {
 	TLS bool   `yaml:"tls,omitempty"`
 }
 
+// ReadinessSpec declares an optional HTTP health probe for a route. When present on a
+// RouteEntry, de project up probes the upstream before registering the route (FR-001/010).
+// Path is required; Timeout and Interval are optional duration strings (defaults: 30s / 500ms).
+type ReadinessSpec struct {
+	Path     string `yaml:"path"`
+	Timeout  string `yaml:"timeout,omitempty"`
+	Interval string `yaml:"interval,omitempty"`
+}
+
 // RouteEntry represents a single route in the project config.
 type RouteEntry struct {
-	Host       string `yaml:"host"`
-	Upstream   string `yaml:"upstream"`
-	Protocol   string `yaml:"protocol,omitempty"`   // "http" (default) or "tcp"
-	BackendTLS bool   `yaml:"backendTLS,omitempty"` // TLS to upstream
-	Mode       string `yaml:"mode,omitempty"`
+	Host       string         `yaml:"host"`
+	Upstream   string         `yaml:"upstream"`
+	Protocol   string         `yaml:"protocol,omitempty"`   // "http" (default) or "tcp"
+	BackendTLS bool           `yaml:"backendTLS,omitempty"` // TLS to upstream
+	Mode       string         `yaml:"mode,omitempty"`
+	Readiness  *ReadinessSpec `yaml:"readiness,omitempty"` // optional health probe (010)
 }
 
 // LoadProject reads and parses a devedge.yaml file.

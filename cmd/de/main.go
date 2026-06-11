@@ -17,6 +17,7 @@ import (
 	"github.com/infobloxopen/devedge/internal/client"
 	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/daemon"
+	"github.com/infobloxopen/devedge/internal/health"
 	"github.com/infobloxopen/devedge/internal/version"
 	"github.com/infobloxopen/devedge/pkg/config"
 )
@@ -329,6 +330,51 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 				}
 			}
 
+			// Health gate: probe each route's upstream before registering (feature 010).
+			// Skipped when --deploy is set (helm --wait already gates readiness) or
+			// when a route has no readiness block declared.
+			// RouteEntry (config layer) carries Readiness; types.Route (domain) does not,
+			// so we type-switch on res to get the raw entries.
+			var routeEntries []config.RouteEntry
+			switch v := res.(type) {
+			case *config.ProjectConfig:
+				routeEntries = v.Spec.Routes
+			case *config.ServiceConfig:
+				routeEntries = v.Spec.Routes
+			}
+			healthyRoutes := make(map[string]bool, len(routeEntries))
+			for _, r := range routeEntries {
+				if r.Readiness == nil || deployFlag {
+					continue
+				}
+				scheme := "http"
+				if r.BackendTLS {
+					scheme = "https"
+				}
+				targetURL := scheme + "://" + r.Upstream + r.Readiness.Path
+				fmt.Printf("%s %s %s\n",
+					colorLabel.Sprint("waiting for"),
+					colorHost.Sprint(r.Host),
+					colorLabel.Sprintf("(%s)", targetURL),
+				)
+				prober := &health.HTTPProber{TargetURL: targetURL}
+				if r.Readiness.Timeout != "" {
+					prober.Timeout, _ = time.ParseDuration(r.Readiness.Timeout)
+				}
+				if r.Readiness.Interval != "" {
+					prober.Interval, _ = time.ParseDuration(r.Readiness.Interval)
+				}
+				ready, err := prober.Probe(context.Background())
+				if err != nil {
+					return fmt.Errorf("readiness probe for %s: %w", r.Host, err)
+				}
+				if !ready {
+					fmt.Printf("%s readiness timeout (%s) — registering route anyway\n",
+						colorWarning.Sprint("warning:"), targetURL)
+				}
+				healthyRoutes[r.Host] = ready
+			}
+
 			var reqs []daemon.RegisterRequest
 			for _, r := range routes {
 				req := daemon.RegisterRequest{
@@ -341,7 +387,11 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 				if err := c.Register(context.Background(), req); err != nil {
 					return fmt.Errorf("register %s: %w", r.Host, err)
 				}
-				fmt.Printf("registered %s %s %s\n", colorHost.Sprint(r.Host), colorLabel.Sprint("->"), r.Upstream)
+				suffix := ""
+				if healthyRoutes[r.Host] {
+					suffix = colorLabel.Sprint(" (healthy)")
+				}
+				fmt.Printf("registered %s %s %s%s\n", colorHost.Sprint(r.Host), colorLabel.Sprint("->"), r.Upstream, suffix)
 				reqs = append(reqs, req)
 			}
 
