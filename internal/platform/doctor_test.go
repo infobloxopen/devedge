@@ -301,3 +301,120 @@ func TestCheckProxyTLS_OldDaemonWithoutTLSField_Skips(t *testing.T) {
 		t.Errorf("message %q should mention 'skipped'", r.Message)
 	}
 }
+
+// withToolchainURL overrides the toolchain endpoint base URL for a test.
+func withToolchainURL(t *testing.T, url string) {
+	t.Helper()
+	prev := doctorToolchainBaseURL
+	doctorToolchainBaseURL = url
+	t.Cleanup(func() { doctorToolchainBaseURL = prev })
+}
+
+// serveToolchain spins up an httptest server answering GET /v1/doctor/toolchain.
+func serveToolchain(t *testing.T, resp daemon.ToolchainResponse) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/doctor/toolchain" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestCheckDaemonToolchain_ToolsFound(t *testing.T) {
+	srv := serveToolchain(t, daemon.ToolchainResponse{
+		Tools: []daemon.ToolInfo{
+			{Name: "helm", Found: true, Path: "/opt/homebrew/bin/helm"},
+			{Name: "kubectl", Found: true, Path: "/Users/u/.rd/bin/kubectl"},
+			{Name: "docker", Found: true, Path: "/usr/local/bin/docker"},
+		},
+		PathSearched: "/Users/u/.rd/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+	})
+	withToolchainURL(t, srv.URL)
+
+	results := checkDaemonToolchain("")
+	if len(results) != 3 {
+		t.Fatalf("want 3 results, got %d: %v", len(results), results)
+	}
+	for _, r := range results {
+		if !r.Passed {
+			t.Errorf("result %q unexpectedly failed: %s", r.Name, r.Message)
+		}
+		if r.Message == "" {
+			t.Errorf("result %q should report the resolved path", r.Name)
+		}
+	}
+}
+
+func TestCheckDaemonToolchain_ToolMissing(t *testing.T) {
+	srv := serveToolchain(t, daemon.ToolchainResponse{
+		Tools: []daemon.ToolInfo{
+			{Name: "helm", Found: false},
+			{Name: "kubectl", Found: true, Path: "/usr/bin/kubectl"},
+		},
+		PathSearched: "/usr/bin:/bin:/usr/sbin:/sbin",
+	})
+	withToolchainURL(t, srv.URL)
+
+	results := checkDaemonToolchain("")
+	var passed, failed int
+	for _, r := range results {
+		if r.Passed {
+			passed++
+			continue
+		}
+		failed++
+		if !strings.Contains(r.Message, "PATH=/usr/bin:/bin:/usr/sbin:/sbin") {
+			t.Errorf("failure message %q must show the daemon's searched PATH", r.Message)
+		}
+		if !strings.Contains(r.Message, "de install") {
+			t.Errorf("failure message %q must point at the fix ('de install')", r.Message)
+		}
+	}
+	if passed != 1 || failed != 1 {
+		t.Errorf("want 1 pass + 1 fail, got %d pass + %d fail", passed, failed)
+	}
+}
+
+func TestCheckDaemonToolchain_DaemonOffline_Skips(t *testing.T) {
+	// Reserve a port, then close, so nothing answers there.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	url := "http://" + ln.Addr().String()
+	ln.Close()
+	withToolchainURL(t, url)
+
+	results := checkDaemonToolchain("")
+	if len(results) != 1 {
+		t.Fatalf("want 1 skipped result, got %d", len(results))
+	}
+	// Offline is not a FAIL — checkDaemonSocket already covers that case.
+	if !results[0].Passed {
+		t.Errorf("offline daemon should report Passed=true (skipped), got: %s", results[0].Message)
+	}
+	if !strings.Contains(results[0].Message, "skipped") {
+		t.Errorf("message %q should mention 'skipped'", results[0].Message)
+	}
+}
+
+func TestCheckDaemonToolchain_OldDaemonWithoutEndpoint_Skips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r) // daemon predates GET /v1/doctor/toolchain
+	}))
+	t.Cleanup(srv.Close)
+	withToolchainURL(t, srv.URL)
+
+	results := checkDaemonToolchain("")
+	if len(results) != 1 {
+		t.Fatalf("want 1 skipped result, got %d", len(results))
+	}
+	if !results[0].Passed || !strings.Contains(results[0].Message, "skipped") {
+		t.Errorf("old daemon should be skipped, got Passed=%v %q", results[0].Passed, results[0].Message)
+	}
+}
