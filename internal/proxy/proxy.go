@@ -36,6 +36,9 @@ type Proxy struct {
 	logger *slog.Logger
 	ca     *caState   // loaded CA for signing; nil means self-signed fallback
 	cache  *certCache // shared cert cache, pre-warmed and used by GetCertificate
+
+	caReason       string    // why the mkcert CA could not be loaded ("" when it was)
+	selfSignedWarn sync.Once // one-shot warning when the first untrusted leaf is minted
 }
 
 // caState holds the parsed mkcert CA cert and key for on-the-fly signing.
@@ -78,11 +81,22 @@ func New(reg *registry.Registry, certPair *certs.CertPair, logger *slog.Logger) 
 		p.ca = ca
 		logger.Info("proxy using mkcert CA for dynamic TLS certs")
 	} else {
-		logger.Info("proxy using self-signed CA for TLS", "reason", err)
+		p.caReason = err.Error()
+		logger.Warn("proxy using self-signed CA for TLS — browsers will reject every routed host",
+			"reason", err,
+			"hint", "run 'de install' to record the mkcert CAROOT for the daemon (or set DEVEDGE_CAROOT) and restart it; 'de doctor' reports this state")
 	}
 
 	return p
 }
+
+// UsingSelfSignedCA reports whether the proxy fell back to the untrusted
+// self-signed CA because the mkcert CA could not be loaded.
+func (p *Proxy) UsingSelfSignedCA() bool { return p.ca == nil }
+
+// CAFallbackReason returns why the mkcert CA could not be loaded. Empty when
+// the mkcert CA is in use.
+func (p *Proxy) CAFallbackReason() string { return p.caReason }
 
 // WarmCerts pre-generates TLS certificates for all currently registered
 // route hostnames so the first request doesn't pay the generation cost.
@@ -222,6 +236,15 @@ func (p *Proxy) generateCert(hostname string) (*tls.Certificate, error) {
 	if p.ca != nil {
 		issuer = p.ca.cert
 		signerKey = p.ca.key
+	} else {
+		// Loud, once: every cert minted from here on is untrusted, and the
+		// only runtime symptom is TLS handshake-error spam from clients.
+		p.selfSignedWarn.Do(func() {
+			p.logger.Warn("serving self-signed TLS certificates — clients will reject them",
+				"first_host", hostname,
+				"reason", p.caReason,
+				"hint", "run 'de install' to record the mkcert CAROOT and restart the daemon")
+		})
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, issuer, &key.PublicKey, signerKey)

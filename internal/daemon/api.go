@@ -6,16 +6,31 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/pkg/types"
 )
+
+// TLSStatus describes which CA the proxy signs per-host TLS certificates
+// with. Mode is "mkcert" when leafs chain to the locally-trusted mkcert root
+// and "self-signed" when the proxy fell back to an ephemeral CA that no
+// client trusts (issue #8). It is part of GET /v1/status so `de status` and
+// `de doctor` can flag the fallback instead of reporting healthy.
+type TLSStatus struct {
+	Mode   string `json:"mode"`             // "mkcert" or "self-signed"
+	CARoot string `json:"caroot,omitempty"` // resolved CAROOT when Mode == "mkcert"
+	Reason string `json:"reason,omitempty"` // why the proxy fell back, when self-signed
+}
 
 // API exposes the route registry over HTTP.
 type API struct {
 	reg    *registry.Registry
 	logger *slog.Logger
 	mux    *http.ServeMux
+
+	mu  sync.RWMutex
+	tls *TLSStatus // nil until the server reports the proxy's CA state
 }
 
 // NewAPI creates an HTTP API backed by the given registry.
@@ -119,12 +134,31 @@ func (a *API) deregisterProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"removed": n})
 }
 
+// SetTLSStatus records the proxy's CA state for the status endpoint. The
+// server calls it once at startup, after the proxy has loaded (or failed to
+// load) the mkcert CA.
+func (a *API) SetTLSStatus(st TLSStatus) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tls = &st
+}
+
+func (a *API) tlsStatus() *TLSStatus {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.tls
+}
+
 func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	routes := a.reg.List()
-	writeJSON(w, http.StatusOK, map[string]any{
+	st := map[string]any{
 		"status": "running",
 		"routes": len(routes),
-	})
+	}
+	if tls := a.tlsStatus(); tls != nil {
+		st["tls"] = tls
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

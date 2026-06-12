@@ -194,7 +194,9 @@ func (s *Server) Run(ctx context.Context) error {
 			certPair = pair
 		}
 	} else {
-		s.logger.Warn("mkcert CA not available, skipping TLS setup", "err", err)
+		s.logger.Warn("mkcert CA not available, skipping TLS setup",
+			"err", err,
+			"hint", "run 'de install' to record the mkcert CAROOT for the daemon (or set DEVEDGE_CAROOT) and restart it")
 	}
 
 	if err := render.WriteStaticConfig(s.traefikDir, s.configDir, certPair); err != nil {
@@ -204,6 +206,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// Start embedded reverse proxy on EdgeIP (127.0.0.2:80/443).
 	if s.manageTraefik {
 		p := proxy.New(s.reg, certPair, s.logger)
+		s.api.SetTLSStatus(proxyTLSStatus(p))
 		go func() {
 			if err := p.Run(ctx); err != nil {
 				s.logger.Error("proxy failed", "err", err)
@@ -286,4 +289,18 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// proxyTLSStatus derives the API-visible TLS status from the proxy's CA
+// state, so `de status` / `de doctor` can flag the self-signed fallback
+// (issue #8) instead of reporting healthy while browsers reject every host.
+func proxyTLSStatus(p *proxy.Proxy) TLSStatus {
+	if p.UsingSelfSignedCA() {
+		return TLSStatus{Mode: "self-signed", Reason: p.CAFallbackReason()}
+	}
+	st := TLSStatus{Mode: "mkcert"}
+	if root, err := certs.CARoot(); err == nil {
+		st.CARoot = root
+	}
+	return st
 }

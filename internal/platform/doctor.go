@@ -2,8 +2,10 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -32,6 +34,11 @@ var doctorDNSAddr = daemon.DefaultDNSAddr()
 // system-resolver probe. Overridable for tests.
 var doctorResolverFactory = func() *net.Resolver { return net.DefaultResolver }
 
+// doctorStatusBaseURL is the base URL used by checkProxyTLS. Empty string
+// means "use the Unix domain socket at the default daemon socket path".
+// Overridden in tests to point at an httptest.Server.
+var doctorStatusBaseURL = ""
+
 // RunDoctor performs a series of health checks and returns the results.
 func RunDoctor() []CheckResult {
 	var results []CheckResult
@@ -39,6 +46,7 @@ func RunDoctor() []CheckResult {
 	results = append(results, checkMkcert())
 	results = append(results, checkMkcertCA())
 	results = append(results, checkDaemonSocket())
+	results = append(results, checkProxyTLS(daemon.DefaultSocketPath()))
 	results = append(results, checkPort(80))
 	results = append(results, checkPort(443))
 	results = append(results, checkDNSEndpoint())
@@ -184,4 +192,75 @@ func checkResolverConfig() CheckResult {
 		return CheckResult{"macOS resolver", true, "/etc/resolver/dev.test exists"}
 	}
 	return CheckResult{"macOS resolver", false, "not configured (optional)"}
+}
+
+// checkProxyTLS asks the running daemon which CA the proxy signs TLS
+// certificates with (GET /v1/status, "tls" block). The self-signed fallback
+// means every browser rejects every routed host, so it is reported as a
+// failure, not a warning (issue #8). A daemon that is offline or predates
+// the TLS status report is skipped, not failed — checkDaemonSocket already
+// covers the offline case.
+func checkProxyTLS(socketPath string) CheckResult {
+	const name = "proxy TLS CA"
+	const timeout = 2 * time.Second
+
+	// Build an HTTP client: a Unix-socket client in production, a TCP client
+	// when doctorStatusBaseURL is overridden by tests.
+	baseURL := doctorStatusBaseURL
+	var httpClient *http.Client
+	if baseURL == "" {
+		baseURL = "http://devedge"
+		httpClient = &http.Client{
+			Timeout: timeout,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return net.DialTimeout("unix", socketPath, timeout)
+				},
+			},
+		}
+	} else {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", baseURL+"/v1/status", nil)
+	if err != nil {
+		return CheckResult{name, false, fmt.Sprintf("build request: %v", err)}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return CheckResult{name, true, "skipped (daemon offline)"}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return CheckResult{name, false, fmt.Sprintf("unexpected status %d from daemon", resp.StatusCode)}
+	}
+
+	var st struct {
+		TLS *daemon.TLSStatus `json:"tls"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return CheckResult{name, false, fmt.Sprintf("decode response: %v", err)}
+	}
+	if st.TLS == nil {
+		return CheckResult{name, true, "skipped (daemon does not report TLS state — restart it after upgrading)"}
+	}
+
+	switch st.TLS.Mode {
+	case "mkcert":
+		msg := "mkcert CA"
+		if st.TLS.CARoot != "" {
+			msg = fmt.Sprintf("mkcert CA (%s)", st.TLS.CARoot)
+		}
+		return CheckResult{name, true, msg}
+	case "self-signed":
+		msg := "proxy is serving a SELF-SIGNED CA — browsers reject every routed host"
+		if st.TLS.Reason != "" {
+			msg += ": " + st.TLS.Reason
+		}
+		msg += "; run 'de install' to record the mkcert CAROOT (or set DEVEDGE_CAROOT) and restart the daemon"
+		return CheckResult{name, false, msg}
+	default:
+		return CheckResult{name, false, fmt.Sprintf("unknown TLS mode %q reported by daemon", st.TLS.Mode)}
+	}
 }

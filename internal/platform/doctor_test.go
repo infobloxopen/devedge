@@ -2,12 +2,16 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/infobloxopen/devedge/internal/daemon"
 	"github.com/infobloxopen/devedge/pkg/types"
 	mdns "github.com/miekg/dns"
 )
@@ -198,5 +202,102 @@ func TestCheckDNSEndpoint_Timeout(t *testing.T) {
 	_ = checkDNSEndpoint()
 	if elapsed := time.Since(start); elapsed > 750*time.Millisecond {
 		t.Errorf("probe took %v, expected under 750ms", elapsed)
+	}
+}
+
+// withStatusURL overrides the daemon status base URL for a test.
+func withStatusURL(t *testing.T, url string) {
+	t.Helper()
+	prev := doctorStatusBaseURL
+	doctorStatusBaseURL = url
+	t.Cleanup(func() { doctorStatusBaseURL = prev })
+}
+
+// serveStatus spins up an httptest server answering GET /v1/status with body.
+func serveStatus(t *testing.T, body any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/status" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(body) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestCheckProxyTLS_Mkcert_Passes(t *testing.T) {
+	srv := serveStatus(t, map[string]any{
+		"status": "running",
+		"routes": 3,
+		"tls":    daemon.TLSStatus{Mode: "mkcert", CARoot: "/Users/u/Library/Application Support/mkcert"},
+	})
+	withStatusURL(t, srv.URL)
+
+	r := checkProxyTLS("")
+	if !r.Passed {
+		t.Fatalf("checkProxyTLS failed: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "mkcert") {
+		t.Errorf("message %q should name the mkcert CA", r.Message)
+	}
+}
+
+func TestCheckProxyTLS_SelfSigned_Fails(t *testing.T) {
+	reason := "CA cert not found at /var/root/Library/Application Support/mkcert/rootCA.pem"
+	srv := serveStatus(t, map[string]any{
+		"status": "running",
+		"routes": 3,
+		"tls":    daemon.TLSStatus{Mode: "self-signed", Reason: reason},
+	})
+	withStatusURL(t, srv.URL)
+
+	r := checkProxyTLS("")
+	if r.Passed {
+		t.Fatalf("checkProxyTLS unexpectedly passed: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "SELF-SIGNED") {
+		t.Errorf("failure message %q must call out the self-signed CA", r.Message)
+	}
+	if !strings.Contains(r.Message, reason) {
+		t.Errorf("failure message %q must include the fallback reason", r.Message)
+	}
+	if !strings.Contains(r.Message, "de install") {
+		t.Errorf("failure message %q must point at the fix ('de install')", r.Message)
+	}
+}
+
+func TestCheckProxyTLS_DaemonOffline_Skips(t *testing.T) {
+	// Reserve a port, then close, so nothing answers there.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	url := "http://" + ln.Addr().String()
+	ln.Close()
+	withStatusURL(t, url)
+
+	r := checkProxyTLS("")
+	// Offline is not a FAIL — checkDaemonSocket already covers that case.
+	if !r.Passed {
+		t.Errorf("offline daemon should report Passed=true (skipped), got: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "skipped") {
+		t.Errorf("message %q should mention 'skipped'", r.Message)
+	}
+}
+
+func TestCheckProxyTLS_OldDaemonWithoutTLSField_Skips(t *testing.T) {
+	srv := serveStatus(t, map[string]any{"status": "running", "routes": 2})
+	withStatusURL(t, srv.URL)
+
+	r := checkProxyTLS("")
+	if !r.Passed {
+		t.Errorf("daemon without tls report should be skipped, got FAIL: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "skipped") {
+		t.Errorf("message %q should mention 'skipped'", r.Message)
 	}
 }
