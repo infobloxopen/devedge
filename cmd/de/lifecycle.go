@@ -29,7 +29,18 @@ func installCmd() *cobra.Command {
 				colorSuccess.Println("OK")
 			}
 
-			// 2. Install macOS resolver if applicable.
+			// 2. Record the resolved CAROOT for the daemon. The daemon runs
+			// as root under launchd ($HOME=/var/root), so without this record
+			// it cannot find the user's mkcert CA after a restart and silently
+			// falls back to a self-signed CA that no browser trusts (issue #8).
+			fmt.Print("Recording CA location... ")
+			if root, err := certs.PersistCARoot(); err != nil {
+				colorWarning.Printf("skipped (%v)\n", err)
+			} else {
+				colorSuccess.Printf("OK (%s)\n", root)
+			}
+
+			// 3. Install macOS resolver if applicable.
 			fmt.Print("Configuring DNS... ")
 			if err := dns.InstallResolverConfig("dev.test"); err != nil {
 				colorWarning.Printf("skipped (%v)\n", err)
@@ -37,7 +48,7 @@ func installCmd() *cobra.Command {
 				colorSuccess.Println("OK")
 			}
 
-			// 3. Install daemon service.
+			// 4. Install daemon service.
 			fmt.Print("Installing daemon service... ")
 			if err := adapter.Install(); err != nil {
 				return fmt.Errorf("install service: %w", err)

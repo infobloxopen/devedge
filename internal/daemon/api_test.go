@@ -159,3 +159,47 @@ func TestRegister_validation(t *testing.T) {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
 }
+
+func TestStatus_TLSStatus(t *testing.T) {
+	api, _ := testAPI(t)
+
+	// Before the server reports the proxy's CA state, status has no tls block.
+	req := httptest.NewRequest("GET", "/v1/status", nil)
+	w := httptest.NewRecorder()
+	api.Handler().ServeHTTP(w, req)
+	var bare map[string]any
+	json.NewDecoder(w.Body).Decode(&bare)
+	if _, ok := bare["tls"]; ok {
+		t.Errorf("unexpected tls block before SetTLSStatus: %v", bare["tls"])
+	}
+
+	// Self-signed fallback must be visible with its reason (issue #8).
+	api.SetTLSStatus(TLSStatus{Mode: "self-signed", Reason: "CA cert not found at /var/root/..."})
+	w = httptest.NewRecorder()
+	api.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/status", nil))
+	var st struct {
+		Status string     `json:"status"`
+		TLS    *TLSStatus `json:"tls"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&st); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if st.TLS == nil {
+		t.Fatal("tls block missing after SetTLSStatus")
+	}
+	if st.TLS.Mode != "self-signed" || st.TLS.Reason == "" {
+		t.Errorf("tls = %+v, want self-signed with reason", st.TLS)
+	}
+
+	// Healthy mkcert mode reports the resolved CAROOT.
+	api.SetTLSStatus(TLSStatus{Mode: "mkcert", CARoot: "/Users/u/Library/Application Support/mkcert"})
+	w = httptest.NewRecorder()
+	api.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/status", nil))
+	st.TLS = nil
+	if err := json.NewDecoder(w.Body).Decode(&st); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if st.TLS == nil || st.TLS.Mode != "mkcert" || st.TLS.CARoot == "" {
+		t.Errorf("tls = %+v, want mkcert with caroot", st.TLS)
+	}
+}
