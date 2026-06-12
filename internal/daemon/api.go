@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"os"
+	"os/exec"
 
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/pkg/types"
@@ -21,6 +23,26 @@ type TLSStatus struct {
 	Mode   string `json:"mode"`             // "mkcert" or "self-signed"
 	CARoot string `json:"caroot,omitempty"` // resolved CAROOT when Mode == "mkcert"
 	Reason string `json:"reason,omitempty"` // why the proxy fell back, when self-signed
+}
+
+// doctorTools are the CLI tools the toolchain check resolves. Kept in sync
+// with platform.daemonTools (this package cannot import internal/platform:
+// platform imports daemon).
+var doctorTools = []string{"helm", "kubectl", "k3d", "docker", "mkcert"}
+
+// ToolInfo describes one tool in the daemon's toolchain check.
+type ToolInfo struct {
+	Name  string `json:"name"`
+	Found bool   `json:"found"`
+	Path  string `json:"path,omitempty"` // absolute path when Found
+}
+
+// ToolchainResponse is the body returned by GET /v1/doctor/toolchain. It
+// reports the tools the daemon can resolve and the PATH it searched, so
+// callers see the daemon's execution environment — not the shell's (issue #9).
+type ToolchainResponse struct {
+	Tools        []ToolInfo `json:"tools"`
+	PathSearched string     `json:"path_searched"`
 }
 
 // API exposes the route registry over HTTP.
@@ -42,8 +64,31 @@ func NewAPI(reg *registry.Registry, logger *slog.Logger) *API {
 	a.mux.HandleFunc("DELETE /v1/routes/{host}", a.deregisterRoute)
 	a.mux.HandleFunc("DELETE /v1/projects/{project}", a.deregisterProject)
 	a.mux.HandleFunc("GET /v1/status", a.status)
+	// Doctor: toolchain check from the daemon's vantage (the daemon's real
+	// PATH under launchd, not the invoking shell's).
+	a.mux.HandleFunc("GET /v1/doctor/toolchain", a.toolchainCheck)
 	addUIRoutes(a.mux, reg)
 	return a
+}
+
+// toolchainCheck runs exec.LookPath for each daemon tool using the daemon's
+// runtime PATH. This is the canonical way to know whether the daemon can
+// actually exec helm/kubectl/k3d/docker — the user's shell resolving them
+// says nothing about the launchd environment.
+func (a *API) toolchainCheck(w http.ResponseWriter, r *http.Request) {
+	resp := ToolchainResponse{
+		PathSearched: os.Getenv("PATH"),
+		Tools:        make([]ToolInfo, 0, len(doctorTools)),
+	}
+	for _, name := range doctorTools {
+		info := ToolInfo{Name: name}
+		if p, err := exec.LookPath(name); err == nil {
+			info.Found = true
+			info.Path = p
+		}
+		resp.Tools = append(resp.Tools, info)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Handler returns the http.Handler for the API.

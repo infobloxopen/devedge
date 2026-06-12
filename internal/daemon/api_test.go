@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/infobloxopen/devedge/internal/registry"
@@ -201,5 +203,47 @@ func TestStatus_TLSStatus(t *testing.T) {
 	}
 	if st.TLS == nil || st.TLS.Mode != "mkcert" || st.TLS.CARoot == "" {
 		t.Errorf("tls = %+v, want mkcert with caroot", st.TLS)
+	}
+}
+
+func TestToolchainCheck(t *testing.T) {
+	// Make tool resolution deterministic: a temp PATH with exactly one of
+	// the checked tools present.
+	toolDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(toolDir, "kubectl"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", toolDir)
+
+	api, _ := testAPI(t)
+	req := httptest.NewRequest("GET", "/v1/doctor/toolchain", nil)
+	w := httptest.NewRecorder()
+	api.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp ToolchainResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.PathSearched != toolDir {
+		t.Errorf("path_searched = %q, want the daemon's PATH %q", resp.PathSearched, toolDir)
+	}
+	if len(resp.Tools) != len(doctorTools) {
+		t.Fatalf("tools = %d, want %d", len(resp.Tools), len(doctorTools))
+	}
+	for _, tool := range resp.Tools {
+		switch tool.Name {
+		case "kubectl":
+			if !tool.Found || tool.Path != filepath.Join(toolDir, "kubectl") {
+				t.Errorf("kubectl = %+v, want found at %s", tool, filepath.Join(toolDir, "kubectl"))
+			}
+		default:
+			if tool.Found {
+				t.Errorf("tool %q unexpectedly found at %q with PATH=%s", tool.Name, tool.Path, toolDir)
+			}
+		}
 	}
 }
