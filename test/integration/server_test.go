@@ -19,7 +19,7 @@ import (
 
 func TestServerIntegration(t *testing.T) {
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	configDir := filepath.Join(tmpDir, "dynamic")
 	hostsFile := filepath.Join(tmpDir, "hosts")
 	os.WriteFile(hostsFile, []byte("127.0.0.1\tlocalhost\n"), 0644)
@@ -146,7 +146,7 @@ func TestServerIntegration(t *testing.T) {
 // the JSON wire format matches what consumers expect.
 func TestServerIntegration_raw(t *testing.T) {
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	configDir := filepath.Join(tmpDir, "dynamic")
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))

@@ -53,7 +53,7 @@ func (f *recordingFake) DropDatabase(_ context.Context, b depruntime.Binding) er
 func startDepDaemon(t *testing.T, prov depruntime.Provisioner) (*client.Client, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	baseDir := filepath.Join(tmpDir, "home")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 

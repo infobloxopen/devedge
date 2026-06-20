@@ -22,7 +22,7 @@ func startRouteDaemon(t *testing.T) *client.Client {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	configDir := filepath.Join(tmpDir, "dynamic")
 	hostsFile := filepath.Join(tmpDir, "hosts")
 	if err := os.WriteFile(hostsFile, []byte("127.0.0.1\tlocalhost\n"), 0644); err != nil {

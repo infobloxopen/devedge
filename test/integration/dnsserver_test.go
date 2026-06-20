@@ -46,7 +46,7 @@ func startDNSDaemon(t *testing.T, suffixes ...string) (string, *dnsServerHandle)
 	tmpDir := t.TempDir()
 	t.Setenv("DEVEDGE_HOME", tmpDir)
 
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	configDir := filepath.Join(tmpDir, "dynamic")
 	hostsFile := filepath.Join(tmpDir, "hosts")
 	_ = os.WriteFile(hostsFile, []byte("127.0.0.1\tlocalhost\n"), 0644)
@@ -227,7 +227,7 @@ func TestSuffixSet_AddRemovePropagatesWithoutRestart(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	t.Setenv("DEVEDGE_HOME", tmpDir)
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	socketPath := shortSocketPath(t)
 	hostsFile := filepath.Join(tmpDir, "hosts")
 	_ = os.WriteFile(hostsFile, []byte("127.0.0.1\tlocalhost\n"), 0644)
 	dnsAddr := pickEphemeralDNSAddr(t)
