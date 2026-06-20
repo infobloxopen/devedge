@@ -9,49 +9,56 @@ import (
 	"text/template"
 )
 
-// clusterTools are the CLI tools the daemon uses for cluster operations.
-var clusterTools = []string{"helm", "kubectl", "k3d", "mkcert"}
-
-// discoverToolEnv discovers the directories containing each required tool in
-// the current PATH, builds a colon-joined PATH value that the daemon plist
-// should carry, and returns a warnings string listing any tools not found.
-// Falls back to a static minimal PATH when a tool's directory cannot be found.
-// home and kubeconfig are passed through for the caller's use.
-func discoverToolEnv(home, kubeconfig string) (toolPath, warnings string) {
-	const fallback = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-	seen := make(map[string]struct{})
-	dirs := []string{}
-	var missing []string
-	for _, t := range clusterTools {
-		p, err := exec.LookPath(t)
-		if err != nil {
-			missing = append(missing, t)
-			continue
-		}
-		d := filepath.Dir(p)
-		if _, ok := seen[d]; !ok {
-			seen[d] = struct{}{}
-			dirs = append(dirs, d)
-		}
-	}
-	// Build PATH: discovered tool dirs first, then the static fallback dirs.
-	for _, d := range strings.Split(fallback, ":") {
-		if _, ok := seen[d]; !ok {
-			seen[d] = struct{}{}
-			dirs = append(dirs, d)
-		}
-	}
-	toolPath = strings.Join(dirs, ":")
-	if len(missing) > 0 {
-		warnings = strings.Join(missing, ", ")
-	}
-	return toolPath, warnings
-}
-
 const launchDaemonLabel = "io.devedge.daemon"
 
 // launchDaemonPath is the system-level plist location (runs as root).
 const launchDaemonPath = "/Library/LaunchDaemons/" + launchDaemonLabel + ".plist"
+
+// daemonTools are the CLI tools the daemon execs at runtime (cluster and
+// dependency operations). launchd starts daemons with the minimal system
+// PATH (/usr/bin:/bin:/usr/sbin:/sbin), where none of these resolve when
+// installed via Homebrew or Rancher Desktop — so `de install` captures the
+// installing user's resolved locations into the plist PATH (issue #9).
+var daemonTools = []string{"helm", "kubectl", "k3d", "docker", "mkcert"}
+
+// discoverToolEnv discovers the directories containing each daemon tool on
+// the invoking user's PATH and builds the colon-joined PATH value the daemon
+// plist should carry: discovered tool dirs first, then a superset of
+// well-known install locations, then the system dirs. It also returns a
+// comma-joined list of tools that could not be found (informational — the
+// fallback dirs usually still cover them once installed).
+func discoverToolEnv(home string) (toolPath, missing string) {
+	fallback := []string{
+		filepath.Join(home, ".rd", "bin"), // Rancher Desktop shims
+		"/opt/homebrew/bin",               // Homebrew (Apple Silicon)
+		"/usr/local/bin",                  // Homebrew (Intel) / manual installs
+		"/usr/bin", "/bin", "/usr/sbin", "/sbin",
+	}
+
+	seen := make(map[string]struct{})
+	var dirs []string
+	add := func(d string) {
+		if _, ok := seen[d]; !ok {
+			seen[d] = struct{}{}
+			dirs = append(dirs, d)
+		}
+	}
+
+	var notFound []string
+	for _, tool := range daemonTools {
+		p, err := exec.LookPath(tool)
+		if err != nil {
+			notFound = append(notFound, tool)
+			continue
+		}
+		add(filepath.Dir(p))
+	}
+	for _, d := range fallback {
+		add(d)
+	}
+
+	return strings.Join(dirs, ":"), strings.Join(notFound, ", ")
+}
 
 // DarwinAdapter manages devedged as a macOS LaunchDaemon (root).
 type DarwinAdapter struct{}
@@ -75,26 +82,30 @@ func (d *DarwinAdapter) Install() error {
 		return err
 	}
 
-	// Resolve the invoking user's home dir. When called via `sudo de install`,
-	// SUDO_USER is the original user; fall back to os.UserHomeDir() otherwise.
+	// Resolve the invoking user's home dir: under `sudo de install` the
+	// daemon state must live under the real user's home, not /var/root.
+	// invokerHome derives it from SUDO_USER/SUDO_HOME, with macOS and Linux
+	// layout fallbacks.
 	home := invokerHome()
 	devedgeHome := filepath.Join(home, ".devedge")
 	logDir := filepath.Join(devedgeHome, "logs")
 	os.MkdirAll(logDir, 0755)
 
-	// Discover the kubeconfig path. Prefer $KUBECONFIG (the invoking user's
-	// shell env, available via sudo passthrough); fall back to the default.
+	// Capture the kubeconfig path from the invoking user's environment
+	// (available via sudo passthrough); fall back to the conventional
+	// location under their home.
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
 		kubeconfig = filepath.Join(home, ".kube", "config")
 	}
 
-	// Discover tool dirs from the invoking user's PATH; warn about missing tools
-	// (non-blocking — the daemon won't work until tools are installed, but the
-	// install itself should not fail for a missing tool).
-	toolPath, warnings := discoverToolEnv(home, kubeconfig)
-	if warnings != "" {
-		fmt.Printf("Warning: tools not found in PATH (daemon may fail until installed): %s\n", warnings)
+	// Capture tool locations from the invoking user's PATH so the daemon —
+	// which launchd starts with the bare system PATH — can exec them.
+	// A missing tool is informational, not fatal: the install itself must
+	// not fail, and the fallback dirs cover the tool once it is installed.
+	toolPath, missing := discoverToolEnv(home)
+	if missing != "" {
+		fmt.Printf("warning: tools not found in PATH (daemon may fail to exec them until installed): %s\n", missing)
 	}
 
 	data := plistData{
@@ -197,9 +208,10 @@ type plistData struct {
 	BinPath     string
 	LogDir      string
 	DevedgeHome string
-	// ToolPATH, Home, Kubeconfig are written into EnvironmentVariables so the
-	// daemon (which runs under launchd with a bare PATH and no HOME) can find
-	// helm/kubectl/k3d/mkcert and read the user's kubeconfig (frictions #2–#4).
+	// ToolPATH, Home, and Kubeconfig are written into EnvironmentVariables
+	// so the daemon — which launchd starts with the minimal system PATH and
+	// root's HOME — can exec helm/kubectl/k3d/docker/mkcert and read the
+	// installing user's kube context (issue #9; frictions #2–#4).
 	ToolPATH   string
 	Home       string
 	Kubeconfig string

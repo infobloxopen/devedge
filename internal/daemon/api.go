@@ -8,12 +8,29 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/pkg/types"
 )
+
+// TLSStatus describes which CA the proxy signs per-host TLS certificates
+// with. Mode is "mkcert" when leafs chain to the locally-trusted mkcert root
+// and "self-signed" when the proxy fell back to an ephemeral CA that no
+// client trusts (issue #8). It is part of GET /v1/status so `de status` and
+// `de doctor` can flag the fallback instead of reporting healthy.
+type TLSStatus struct {
+	Mode   string `json:"mode"`             // "mkcert" or "self-signed"
+	CARoot string `json:"caroot,omitempty"` // resolved CAROOT when Mode == "mkcert"
+	Reason string `json:"reason,omitempty"` // why the proxy fell back, when self-signed
+}
+
+// doctorTools are the CLI tools the toolchain check resolves. Kept in sync
+// with platform.daemonTools (this package cannot import internal/platform:
+// platform imports daemon).
+var doctorTools = []string{"helm", "kubectl", "k3d", "docker", "mkcert"}
 
 // ToolInfo describes one tool in the daemon's toolchain check.
 type ToolInfo struct {
@@ -24,7 +41,7 @@ type ToolInfo struct {
 
 // ToolchainResponse is the body returned by GET /v1/doctor/toolchain. It
 // reports the tools the daemon can resolve and the PATH it searched, so
-// callers can see the daemon's execution environment (not the shell's).
+// callers see the daemon's execution environment — not the shell's (issue #9).
 type ToolchainResponse struct {
 	Tools        []ToolInfo `json:"tools"`
 	PathSearched string     `json:"path_searched"`
@@ -36,6 +53,9 @@ type API struct {
 	deps   *DepManager
 	logger *slog.Logger
 	mux    *http.ServeMux
+
+	mu  sync.RWMutex
+	tls *TLSStatus // nil until the server reports the proxy's CA state
 }
 
 // NewAPI creates an HTTP API backed by the given registry and (optional)
@@ -53,22 +73,23 @@ func NewAPI(reg *registry.Registry, deps *DepManager, logger *slog.Logger) *API 
 	a.mux.HandleFunc("PUT /v1/services/{service}/dependencies", a.applyDependencies)
 	a.mux.HandleFunc("GET /v1/services/{service}/dependencies", a.getDependencies)
 	a.mux.HandleFunc("DELETE /v1/services/{service}/dependencies", a.releaseDependencies)
-	// Doctor: toolchain check from the daemon's vantage (sees the daemon's real PATH/HOME).
+	// Doctor: toolchain check from the daemon's vantage (the daemon's real
+	// PATH/HOME under launchd, not the invoking shell's).
 	a.mux.HandleFunc("GET /v1/doctor/toolchain", a.toolchainCheck)
 	addUIRoutes(a.mux, reg)
 	return a
 }
 
-// toolchainCheck runs exec.LookPath for each cluster tool using the daemon's
-// runtime PATH (not the invoking shell's PATH). This is the canonical way to
-// know whether the daemon can actually exec helm/kubectl/k3d.
+// toolchainCheck runs exec.LookPath for each daemon tool using the daemon's
+// runtime PATH. This is the canonical way to know whether the daemon can
+// actually exec helm/kubectl/k3d/docker — the user's shell resolving them
+// says nothing about the launchd environment.
 func (a *API) toolchainCheck(w http.ResponseWriter, r *http.Request) {
-	tools := []string{"helm", "kubectl", "k3d", "mkcert"}
 	resp := ToolchainResponse{
 		PathSearched: os.Getenv("PATH"),
-		Tools:        make([]ToolInfo, 0, len(tools)),
+		Tools:        make([]ToolInfo, 0, len(doctorTools)),
 	}
-	for _, name := range tools {
+	for _, name := range doctorTools {
 		info := ToolInfo{Name: name}
 		if p, err := exec.LookPath(name); err == nil {
 			info.Found = true
@@ -76,8 +97,7 @@ func (a *API) toolchainCheck(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Tools = append(resp.Tools, info)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DependencyRequest is one declared dependency in an ApplyRequest.
@@ -238,12 +258,31 @@ func (a *API) deregisterProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"removed": n})
 }
 
+// SetTLSStatus records the proxy's CA state for the status endpoint. The
+// server calls it once at startup, after the proxy has loaded (or failed to
+// load) the mkcert CA.
+func (a *API) SetTLSStatus(st TLSStatus) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tls = &st
+}
+
+func (a *API) tlsStatus() *TLSStatus {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.tls
+}
+
 func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	routes := a.reg.List()
-	writeJSON(w, http.StatusOK, map[string]any{
+	st := map[string]any{
 		"status": "running",
 		"routes": len(routes),
-	})
+	}
+	if tls := a.tlsStatus(); tls != nil {
+		st["tls"] = tls
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

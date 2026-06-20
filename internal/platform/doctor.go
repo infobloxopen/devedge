@@ -34,9 +34,14 @@ var doctorDNSAddr = daemon.DefaultDNSAddr()
 // system-resolver probe. Overridable for tests.
 var doctorResolverFactory = func() *net.Resolver { return net.DefaultResolver }
 
+// doctorStatusBaseURL is the base URL used by checkProxyTLS. Empty string
+// means "use the Unix domain socket at the default daemon socket path".
+// Overridden in tests to point at an httptest.Server.
+var doctorStatusBaseURL = ""
+
 // doctorToolchainBaseURL is the base URL used by checkDaemonToolchain. Empty
-// string means "use the Unix domain socket at socketPath". Overridden in tests
-// to point at an httptest.Server.
+// string means "use the Unix domain socket at the default daemon socket
+// path". Overridden in tests to point at an httptest.Server.
 var doctorToolchainBaseURL = ""
 
 // RunDoctor performs a series of health checks and returns the results.
@@ -46,6 +51,7 @@ func RunDoctor() []CheckResult {
 	results = append(results, checkMkcert())
 	results = append(results, checkMkcertCA())
 	results = append(results, checkDaemonSocket())
+	results = append(results, checkProxyTLS(daemon.DefaultSocketPath()))
 	results = append(results, checkPort(80))
 	results = append(results, checkPort(443))
 	results = append(results, checkDNSEndpoint())
@@ -194,16 +200,91 @@ func checkResolverConfig() CheckResult {
 	return CheckResult{"macOS resolver", false, "not configured (optional)"}
 }
 
-// checkDaemonToolchain queries the daemon's GET /v1/doctor/toolchain endpoint
-// so the doctor validates the toolchain from the daemon's vantage (uses the
-// daemon's real PATH and HOME, not the shell's). socketPath is the Unix domain
-// socket; it is ignored when doctorToolchainBaseURL is overridden for tests.
-func checkDaemonToolchain(socketPath string) []CheckResult {
+// checkProxyTLS asks the running daemon which CA the proxy signs TLS
+// certificates with (GET /v1/status, "tls" block). The self-signed fallback
+// means every browser rejects every routed host, so it is reported as a
+// failure, not a warning (issue #8). A daemon that is offline or predates
+// the TLS status report is skipped, not failed — checkDaemonSocket already
+// covers the offline case.
+func checkProxyTLS(socketPath string) CheckResult {
+	const name = "proxy TLS CA"
 	const timeout = 2 * time.Second
 
-	// Build an HTTP client: either a TCP client (tests) or a Unix-socket client (prod).
+	// Build an HTTP client: a Unix-socket client in production, a TCP client
+	// when doctorStatusBaseURL is overridden by tests.
+	baseURL := doctorStatusBaseURL
 	var httpClient *http.Client
+	if baseURL == "" {
+		baseURL = "http://devedge"
+		httpClient = &http.Client{
+			Timeout: timeout,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return net.DialTimeout("unix", socketPath, timeout)
+				},
+			},
+		}
+	} else {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", baseURL+"/v1/status", nil)
+	if err != nil {
+		return CheckResult{name, false, fmt.Sprintf("build request: %v", err)}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return CheckResult{name, true, "skipped (daemon offline)"}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return CheckResult{name, false, fmt.Sprintf("unexpected status %d from daemon", resp.StatusCode)}
+	}
+
+	var st struct {
+		TLS *daemon.TLSStatus `json:"tls"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return CheckResult{name, false, fmt.Sprintf("decode response: %v", err)}
+	}
+	if st.TLS == nil {
+		return CheckResult{name, true, "skipped (daemon does not report TLS state — restart it after upgrading)"}
+	}
+
+	switch st.TLS.Mode {
+	case "mkcert":
+		msg := "mkcert CA"
+		if st.TLS.CARoot != "" {
+			msg = fmt.Sprintf("mkcert CA (%s)", st.TLS.CARoot)
+		}
+		return CheckResult{name, true, msg}
+	case "self-signed":
+		msg := "proxy is serving a SELF-SIGNED CA — browsers reject every routed host"
+		if st.TLS.Reason != "" {
+			msg += ": " + st.TLS.Reason
+		}
+		msg += "; run 'de install' to record the mkcert CAROOT (or set DEVEDGE_CAROOT) and restart the daemon"
+		return CheckResult{name, false, msg}
+	default:
+		return CheckResult{name, false, fmt.Sprintf("unknown TLS mode %q reported by daemon", st.TLS.Mode)}
+	}
+}
+
+// checkDaemonToolchain queries the daemon's GET /v1/doctor/toolchain endpoint
+// so the doctor validates tool resolution from the daemon's vantage: launchd
+// starts the daemon with the minimal system PATH, so the user's shell
+// resolving helm/kubectl/docker says nothing about whether the daemon can
+// exec them (issue #9). socketPath is the daemon's Unix domain socket; it is
+// ignored when doctorToolchainBaseURL is overridden for tests. A daemon that
+// is offline or predates the endpoint is skipped, not failed —
+// checkDaemonSocket already covers the offline case.
+func checkDaemonToolchain(socketPath string) []CheckResult {
+	const name = "daemon toolchain"
+	const timeout = 2 * time.Second
+
 	baseURL := doctorToolchainBaseURL
+	var httpClient *http.Client
 	if baseURL == "" {
 		baseURL = "http://devedge"
 		httpClient = &http.Client{
@@ -220,34 +301,34 @@ func checkDaemonToolchain(socketPath string) []CheckResult {
 
 	req, err := http.NewRequestWithContext(context.Background(), "GET", baseURL+"/v1/doctor/toolchain", nil)
 	if err != nil {
-		return []CheckResult{{"daemon toolchain", false, fmt.Sprintf("build request: %v", err)}}
+		return []CheckResult{{name, false, fmt.Sprintf("build request: %v", err)}}
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return []CheckResult{{"daemon toolchain", true, "skipped (daemon offline)"}}
+		return []CheckResult{{name, true, "skipped (daemon offline)"}}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return []CheckResult{{"daemon toolchain", true, "skipped (old daemon — restart after `de install` to enable)"}}
+		return []CheckResult{{name, true, "skipped (daemon predates the toolchain check — restart it after upgrading)"}}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return []CheckResult{{"daemon toolchain", false, fmt.Sprintf("unexpected status %d from daemon", resp.StatusCode)}}
+		return []CheckResult{{name, false, fmt.Sprintf("unexpected status %d from daemon", resp.StatusCode)}}
 	}
 
 	var tc daemon.ToolchainResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tc); err != nil {
-		return []CheckResult{{"daemon toolchain", false, fmt.Sprintf("decode response: %v", err)}}
+		return []CheckResult{{name, false, fmt.Sprintf("decode response: %v", err)}}
 	}
 
 	results := make([]CheckResult, 0, len(tc.Tools))
 	for _, tool := range tc.Tools {
-		name := "daemon tool: " + tool.Name
+		toolName := "daemon tool: " + tool.Name
 		if tool.Found {
-			results = append(results, CheckResult{name, true, tool.Path})
+			results = append(results, CheckResult{toolName, true, tool.Path})
 		} else {
-			results = append(results, CheckResult{name, false,
-				fmt.Sprintf("not found in daemon PATH=%s", tc.PathSearched)})
+			results = append(results, CheckResult{toolName, false,
+				fmt.Sprintf("not found in daemon PATH=%s — re-run 'de install' and reload the daemon (launchctl bootout/bootstrap; kickstart does not re-read plist env)", tc.PathSearched)})
 		}
 	}
 	return results

@@ -205,6 +205,103 @@ func TestCheckDNSEndpoint_Timeout(t *testing.T) {
 	}
 }
 
+// withStatusURL overrides the daemon status base URL for a test.
+func withStatusURL(t *testing.T, url string) {
+	t.Helper()
+	prev := doctorStatusBaseURL
+	doctorStatusBaseURL = url
+	t.Cleanup(func() { doctorStatusBaseURL = prev })
+}
+
+// serveStatus spins up an httptest server answering GET /v1/status with body.
+func serveStatus(t *testing.T, body any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/status" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(body) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestCheckProxyTLS_Mkcert_Passes(t *testing.T) {
+	srv := serveStatus(t, map[string]any{
+		"status": "running",
+		"routes": 3,
+		"tls":    daemon.TLSStatus{Mode: "mkcert", CARoot: "/Users/u/Library/Application Support/mkcert"},
+	})
+	withStatusURL(t, srv.URL)
+
+	r := checkProxyTLS("")
+	if !r.Passed {
+		t.Fatalf("checkProxyTLS failed: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "mkcert") {
+		t.Errorf("message %q should name the mkcert CA", r.Message)
+	}
+}
+
+func TestCheckProxyTLS_SelfSigned_Fails(t *testing.T) {
+	reason := "CA cert not found at /var/root/Library/Application Support/mkcert/rootCA.pem"
+	srv := serveStatus(t, map[string]any{
+		"status": "running",
+		"routes": 3,
+		"tls":    daemon.TLSStatus{Mode: "self-signed", Reason: reason},
+	})
+	withStatusURL(t, srv.URL)
+
+	r := checkProxyTLS("")
+	if r.Passed {
+		t.Fatalf("checkProxyTLS unexpectedly passed: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "SELF-SIGNED") {
+		t.Errorf("failure message %q must call out the self-signed CA", r.Message)
+	}
+	if !strings.Contains(r.Message, reason) {
+		t.Errorf("failure message %q must include the fallback reason", r.Message)
+	}
+	if !strings.Contains(r.Message, "de install") {
+		t.Errorf("failure message %q must point at the fix ('de install')", r.Message)
+	}
+}
+
+func TestCheckProxyTLS_DaemonOffline_Skips(t *testing.T) {
+	// Reserve a port, then close, so nothing answers there.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	url := "http://" + ln.Addr().String()
+	ln.Close()
+	withStatusURL(t, url)
+
+	r := checkProxyTLS("")
+	// Offline is not a FAIL — checkDaemonSocket already covers that case.
+	if !r.Passed {
+		t.Errorf("offline daemon should report Passed=true (skipped), got: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "skipped") {
+		t.Errorf("message %q should mention 'skipped'", r.Message)
+	}
+}
+
+func TestCheckProxyTLS_OldDaemonWithoutTLSField_Skips(t *testing.T) {
+	srv := serveStatus(t, map[string]any{"status": "running", "routes": 2})
+	withStatusURL(t, srv.URL)
+
+	r := checkProxyTLS("")
+	if !r.Passed {
+		t.Errorf("daemon without tls report should be skipped, got FAIL: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "skipped") {
+		t.Errorf("message %q should mention 'skipped'", r.Message)
+	}
+}
+
 // withToolchainURL overrides the toolchain endpoint base URL for a test.
 func withToolchainURL(t *testing.T, url string) {
 	t.Helper()
@@ -213,15 +310,9 @@ func withToolchainURL(t *testing.T, url string) {
 	t.Cleanup(func() { doctorToolchainBaseURL = prev })
 }
 
-func TestCheckDaemonToolchain_ToolsFound(t *testing.T) {
-	resp := daemon.ToolchainResponse{
-		Tools: []daemon.ToolInfo{
-			{Name: "helm", Found: true, Path: "/opt/homebrew/bin/helm"},
-			{Name: "kubectl", Found: true, Path: "/Users/u/.rd/bin/kubectl"},
-			{Name: "k3d", Found: true, Path: "/usr/local/bin/k3d"},
-		},
-		PathSearched: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-	}
+// serveToolchain spins up an httptest server answering GET /v1/doctor/toolchain.
+func serveToolchain(t *testing.T, resp daemon.ToolchainResponse) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/doctor/toolchain" {
 			http.NotFound(w, r)
@@ -231,6 +322,18 @@ func TestCheckDaemonToolchain_ToolsFound(t *testing.T) {
 		json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}))
 	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestCheckDaemonToolchain_ToolsFound(t *testing.T) {
+	srv := serveToolchain(t, daemon.ToolchainResponse{
+		Tools: []daemon.ToolInfo{
+			{Name: "helm", Found: true, Path: "/opt/homebrew/bin/helm"},
+			{Name: "kubectl", Found: true, Path: "/Users/u/.rd/bin/kubectl"},
+			{Name: "docker", Found: true, Path: "/usr/local/bin/docker"},
+		},
+		PathSearched: "/Users/u/.rd/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+	})
 	withToolchainURL(t, srv.URL)
 
 	results := checkDaemonToolchain("")
@@ -241,35 +344,35 @@ func TestCheckDaemonToolchain_ToolsFound(t *testing.T) {
 		if !r.Passed {
 			t.Errorf("result %q unexpectedly failed: %s", r.Name, r.Message)
 		}
+		if r.Message == "" {
+			t.Errorf("result %q should report the resolved path", r.Name)
+		}
 	}
 }
 
 func TestCheckDaemonToolchain_ToolMissing(t *testing.T) {
-	resp := daemon.ToolchainResponse{
+	srv := serveToolchain(t, daemon.ToolchainResponse{
 		Tools: []daemon.ToolInfo{
-			{Name: "helm", Found: true, Path: "/opt/homebrew/bin/helm"},
-			{Name: "kubectl", Found: false, Path: ""},
+			{Name: "helm", Found: false},
+			{Name: "kubectl", Found: true, Path: "/usr/bin/kubectl"},
 		},
-		PathSearched: "/usr/bin:/bin",
-	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp) //nolint:errcheck
-	}))
-	t.Cleanup(srv.Close)
+		PathSearched: "/usr/bin:/bin:/usr/sbin:/sbin",
+	})
 	withToolchainURL(t, srv.URL)
 
 	results := checkDaemonToolchain("")
-	passed := 0
-	failed := 0
+	var passed, failed int
 	for _, r := range results {
 		if r.Passed {
 			passed++
-		} else {
-			failed++
-			if !strings.Contains(r.Message, "PATH=") {
-				t.Errorf("fail message %q must include PATH= to show searched path", r.Message)
-			}
+			continue
+		}
+		failed++
+		if !strings.Contains(r.Message, "PATH=/usr/bin:/bin:/usr/sbin:/sbin") {
+			t.Errorf("failure message %q must show the daemon's searched PATH", r.Message)
+		}
+		if !strings.Contains(r.Message, "de install") {
+			t.Errorf("failure message %q must point at the fix ('de install')", r.Message)
 		}
 	}
 	if passed != 1 || failed != 1 {
@@ -277,19 +380,41 @@ func TestCheckDaemonToolchain_ToolMissing(t *testing.T) {
 	}
 }
 
-func TestCheckDaemonToolchain_DaemonOffline(t *testing.T) {
-	// Point at a URL that refuses connections (no server running).
-	withToolchainURL(t, "http://127.0.0.1:1")
+func TestCheckDaemonToolchain_DaemonOffline_Skips(t *testing.T) {
+	// Reserve a port, then close, so nothing answers there.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	url := "http://" + ln.Addr().String()
+	ln.Close()
+	withToolchainURL(t, url)
 
 	results := checkDaemonToolchain("")
 	if len(results) != 1 {
 		t.Fatalf("want 1 skipped result, got %d", len(results))
 	}
-	// offline is not a FAIL — it is expected when the daemon isn't running.
+	// Offline is not a FAIL — checkDaemonSocket already covers that case.
 	if !results[0].Passed {
-		t.Error("offline daemon should report Passed=true (skipped, not failed)")
+		t.Errorf("offline daemon should report Passed=true (skipped), got: %s", results[0].Message)
 	}
 	if !strings.Contains(results[0].Message, "skipped") {
 		t.Errorf("message %q should mention 'skipped'", results[0].Message)
+	}
+}
+
+func TestCheckDaemonToolchain_OldDaemonWithoutEndpoint_Skips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r) // daemon predates GET /v1/doctor/toolchain
+	}))
+	t.Cleanup(srv.Close)
+	withToolchainURL(t, srv.URL)
+
+	results := checkDaemonToolchain("")
+	if len(results) != 1 {
+		t.Fatalf("want 1 skipped result, got %d", len(results))
+	}
+	if !results[0].Passed || !strings.Contains(results[0].Message, "skipped") {
+		t.Errorf("old daemon should be skipped, got Passed=%v %q", results[0].Passed, results[0].Message)
 	}
 }
