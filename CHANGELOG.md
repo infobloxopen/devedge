@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.2.0] - 2026-06-20
+
+### Added
+
 #### Service scaffold (007-service-scaffold-onboarding)
 
 - **`de project init NAME [--dir DIR] [--module MODULE]`**: scaffolds a complete
@@ -21,6 +29,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   canonical authz annotation module). The onboarding walk-through — scaffold → `make
   generate` → `de project up` → CRUD over `https://NAME.dev.test/v1/webhook-endpoints` →
   `de project up --deploy` — ships as an automated e2e.
+
+- **`de new service NAME`**: thin driver over `devedge-sdk new service` that generates an
+  apx-native, devedge-sdk-backed service scaffold and emits a `kind: Config` `devedge.yaml`
+  route entry so `de project up` serves it immediately. Complements (does not replace) `de
+  project init`; intended for teams already using the SDK's code-generation toolchain.
 
 #### Schema migrations and dev seed (006-storage-migrations-seed)
 
@@ -76,6 +89,67 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`github.com/infobloxopen/migrate`, branch `ib`), consumed via a `go.mod` `replace`. Migrations
   use the standard golang-migrate `NNN_name.up.sql`/`.down.sql` convention and a
   `schema_migrations` version table.
+
+#### Daemon toolchain install and doctor (008-daemon-toolchain-install-doctor)
+
+- **`de install` injects tool PATH, HOME, and KUBECONFIG**: the installer now discovers tool
+  directories from the invoking user's `PATH` and writes them into the daemon launchd plist's
+  `EnvironmentVariables`, so the daemon running under launchd has the same tools available as
+  the installing user (resolves helm/kubectl/k3d lookup failures in the daemon process).
+
+- **`de doctor` shows daemon toolchain**: a new "daemon toolchain" section in `de doctor`
+  reports per-tool availability as seen from the daemon's own environment (not the shell's).
+  Shows `found`/`failed` with the daemon's effective PATH. Reports "skipped (daemon offline)"
+  when the daemon is not running, so `doctor` is useful at all stages of setup.
+
+- **Early tool preflight**: `de project up` now checks for required tools (helm, kubectl, k3d)
+  before attempting to ensure/create a cluster, so a missing tool is reported immediately
+  with an actionable error rather than after wasted cluster-creation time.
+
+#### Health-gated route readiness (010-health-gated-route-readiness)
+
+- **Upstream health probe before route registration**: `de project up` now probes each service's
+  upstream health endpoint after the port-forward is established and before registering the route
+  with the daemon. Routes are not advertised until the upstream responds healthy, so clients
+  never receive a 502 from a route that points at a not-yet-ready service.
+
+#### Client-go native port-forward (009)
+
+- **Replaced kubectl subprocess port-forward with client-go native portforwarder**: the daemon
+  no longer shells out to `kubectl port-forward`; port-forwards are managed in-process via the
+  Kubernetes client-go port-forward API. This eliminates a class of failures caused by kubectl
+  not being in the daemon's PATH and makes port-forward lifecycle management more reliable.
+
+#### Service config `kind: Service` and dependency runtime (002/003)
+
+- **`kind: Service` in `devedge.yaml`**: new project-file variant (alongside `kind: Config`)
+  that declares a service's Postgres and Redis dependencies with required name, engine, and
+  port; unknown fields are rejected. `de project up`/`down` dispatch on the declared kind.
+
+- **Dependency runtime**: `de project up` provisions declared Postgres and Redis dependencies
+  as shared Helm-managed engine instances in the resolved cluster, binds per-service logical
+  databases/users, and exposes them to the service via an ephemeral port-forward DSN. DSN
+  secrets use the indirect-DSN + real-DSN-file convention. `de project down` releases
+  bindings; `--clean` removes the engine instance when no other services share it.
+
+#### Embedded reverse proxy, per-host TLS, DNS, and TCP/SNI (#1–#7)
+
+- **Embedded reverse proxy**: the daemon now runs an in-process reverse proxy instead of
+  managing a Traefik subprocess, eliminating a class of PATH and process-management failures.
+
+- **Dynamic per-host TLS signed by mkcert CA** with startup pre-warm: each registered route
+  gets a TLS certificate signed by the local mkcert CA; certificates are pre-warmed at daemon
+  startup so the first request to a route never triggers a TLS handshake delay.
+
+- **In-process authoritative DNS**: the daemon serves DNS authoritatively for configured
+  `.test` suffixes in-process, removing the dependency on external DNS tooling for local
+  development.
+
+- **TCP/SNI routing**: non-HTTP TCP services can be routed by SNI hostname, enabling
+  gRPC-over-TLS and other TCP protocols alongside HTTP services.
+
+- **`<app>.<cluster>.test` cluster domain naming**: routes for services in a named cluster
+  are reachable at `<app>.<cluster>.test` in addition to the per-service hostname.
 
 #### Workload deploy (005-app-workload-deploy)
 
@@ -164,13 +238,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `kind: Service` strict decode now accepts the optional `spec.cluster` and
   `spec.dependencies[].dedicated` fields; unknown fields are still rejected.
 
-### Internal
+### Fixed
 
-- `internal/cluster/topology.go`: `Environment` type, `DetectEnvironment`,
-  `ClusterTarget`, `Resolve`, `RunID`, `ProjectSlug`.
-- `internal/cluster/ensure.go`: `Ensurer` with idempotent `EnsureCluster`,
-  `EnsureEphemeral`, and `Teardown`; host-level flock; injectable bootstrap
-  and probe seams for unit testing.
-- Daemon `ApplyDependencies` request gains optional `KubeContext` and
-  `Namespace` fields; empty `KubeContext` preserves the existing behavior
-  (backward compatible).
+- **mkcert CAROOT resolution for the root daemon**: the daemon now correctly
+  locates the mkcert CA root when running as root under launchd, so TLS
+  certificates are always signed by the trusted local CA. A `--self-signed`
+  fallback flag is available for environments where mkcert is not installed.
+
+- **Daemon PATH inheritance**: the daemon launchd plist now carries the
+  installing user's tool PATH, HOME, and KUBECONFIG, fixing helm/kubectl/k3d
+  lookup failures that appeared only when the daemon ran under launchd.
+
+- **Relative `-f` path resolution**: `de project up -f <path>` with a relative
+  path now resolves correctly on the daemon side, fixing an ENOENT error that
+  appeared during the onboarding walk-through.
+
+[Unreleased]: https://github.com/infobloxopen/devedge/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/infobloxopen/devedge/compare/v0.1.0...v0.2.0
