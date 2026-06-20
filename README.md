@@ -413,6 +413,36 @@ curl -X POST https://webhooks.dev.test/v1/webhook-endpoints \
 For in-cluster: `de project up --deploy` (builds the image, loads it into the dev cluster, runs
 the migration Job, then rolls the Deployment).
 
+### `de new service` — scaffold an apx-native service
+
+`de new service NAME [--resource RESOURCE] [--backend BACKEND] [--dir DIR] [-- DEVEDGE_SDK_FLAGS...]`
+is a thin driver over the [devedge-sdk](https://github.com/infobloxopen/devedge-sdk) scaffold. Use
+it when you want an **apx-native, authz-gated, persisting gRPC + HTTP service** from day one:
+
+- Forwards to `devedge-sdk new service` for the heavy lifting (annotated proto, generated models +
+  repository + gRPC server + REST/JSON gateway, fail-closed authz boot gate).
+- Emits a `devedge.yaml` (`kind: Config`) routing the service's HTTP/JSON gateway through the local
+  edge so `de project up` serves it over stable HTTPS immediately.
+
+```bash
+de new service orders --resource Order
+de new service notes --resource Note --backend ent
+de new service orders --resource Order --dir ./services/orders -- --module github.com/acme/orders
+```
+
+**When to use which scaffold:**
+
+| Command | Use when |
+|---------|----------|
+| `de new service` | You want an apx-governed proto, authz rules, and generated server from the start; devedge-sdk manages the code generation lifecycle |
+| `de project init` | You want a conventional in-tree service scaffold (Postgres migration, Dockerfile, proto stubs) without adopting apx codegen |
+
+Requires [`devedge-sdk`](https://github.com/infobloxopen/devedge-sdk) on PATH:
+
+```bash
+go install github.com/infobloxopen/devedge-sdk/cmd/devedge-sdk@latest
+```
+
 ### `Service` kind
 
 In addition to `kind: Config`, devedge understands `kind: Service` — a service-oriented

@@ -35,7 +35,7 @@ const (
 	// SDKInstallVersion is the released devedge-sdk version that ships the
 	// `new service` CLI; surfaced in the not-installed error so the fix is a
 	// copy-paste.
-	SDKInstallVersion = "v0.12.0"
+	SDKInstallVersion = "latest"
 
 	// GatewayPort is the HTTP/JSON gateway port the devedge-sdk scaffold's
 	// server listens on. The scaffold's main.go template hardcodes
