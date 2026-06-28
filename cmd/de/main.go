@@ -4,20 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
-	"os/signal"
-	"path/filepath"
-	"syscall"
 	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/infobloxopen/devedge/internal/client"
 	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/daemon"
-	"github.com/infobloxopen/devedge/internal/health"
 	"github.com/infobloxopen/devedge/internal/version"
 	"github.com/infobloxopen/devedge/pkg/config"
 )
@@ -65,6 +59,7 @@ func rootCmd() *cobra.Command {
 		inspectCmd(),
 		newCmd(),
 		projectCmd(),
+		composeCmd(),
 		clusterCmd(),
 		ciCmd(),
 		k3dAliasCmd(),
@@ -263,165 +258,10 @@ Press Ctrl-C to stop and let leases expire naturally.`,
 			if err != nil {
 				return err
 			}
-			routes, err := res.ToRoutes()
-			if err != nil {
-				return err
-			}
-			if len(routes) == 0 {
-				fmt.Printf("no routes declared in %s\n", file)
-			}
-
-			c := newClient()
-
-			// Resolve the target cluster from the environment (FR-001/009) and
-			// report where this project lands (FR-003). Resolution is always done
-			// (even for a no-deps project) so the placement is observable; the
-			// cluster is only *ensured* when there is something to provision on it.
-			provider := defaultProvider()
-			env := cluster.DetectEnvironment(envOverride)
-			dedicated := false
-			if cp, ok := res.(config.ClusterPreferrer); ok {
-				dedicated = cp.ClusterDedicated()
-			}
-			target := cluster.Resolve(provider, env, res.Project(), dedicated)
-			fmt.Printf("%s %s %s\n", colorLabel.Sprint("cluster:"), colorHost.Sprint(target.Name), colorLabel.Sprintf("(%s)", clusterMode(target)))
-
-			// Start declared dependencies on the resolved cluster (FR-001/002).
-			// Engaged only when a Service declares dependencies — kind: Config and
-			// no-deps Services are unaffected (FR-013) and skip cluster ensure.
-			if dd, ok := res.(config.DependencyDeclarer); ok && len(dd.Dependencies()) > 0 {
-				// Preflight: all cluster tools must be present before any cluster
-				// work begins (friction #1 from 007 walk-through). Fail fast here
-				// so no cluster time is wasted on a missing helm/kubectl/k3d.
-				if err := requireDependencyTools(); err != nil {
-					return err
-				}
-				// Ensure the resolved cluster exists + is bootstrapped before
-				// provisioning. A failure exits non-zero with an actionable,
-				// retryable message and leaves no half-created cluster (FR-002/011/012).
-				ensurer := cluster.NewEnsurer(provider)
-				if err := ensurer.EnsureCluster(context.Background(), target.Name); err != nil {
-					return err
-				}
-				// Resolve declared schema migrations/seed to absolute paths against
-				// the project root (the dir of -f); a config error here aborts up (006).
-				var migs []config.DependencyMigrations
-				if md, ok := res.(config.MigrationDeclarer); ok {
-					m, err := md.Migrations(filepath.Dir(file))
-					if err != nil {
-						return err
-					}
-					migs = m
-				}
-				if err := provisionDependencies(c, res.Project(), dd.Dependencies(), migs, env, target); err != nil {
-					return err
-				}
-			}
-
-			// Opt-in: deploy the service workload into the resolved cluster (005).
-			// Local-run is unchanged when --deploy is absent (FR-010).
-			if deployFlag {
-				// Ensure the cluster for the workload (idempotent; the deps block
-				// above may have already ensured it).
-				if err := cluster.NewEnsurer(provider).EnsureCluster(context.Background(), target.Name); err != nil {
-					return err
-				}
-				if err := deployWorkload(res, target); err != nil {
-					return err
-				}
-			}
-
-			// Health gate: probe each route's upstream before registering (feature 010).
-			// Skipped when --deploy is set (helm --wait already gates readiness) or
-			// when a route has no readiness block declared.
-			// RouteEntry (config layer) carries Readiness; types.Route (domain) does not,
-			// so we type-switch on res to get the raw entries.
-			var routeEntries []config.RouteEntry
-			switch v := res.(type) {
-			case *config.ProjectConfig:
-				routeEntries = v.Spec.Routes
-			case *config.ServiceConfig:
-				routeEntries = v.Spec.Routes
-			}
-			healthyRoutes := make(map[string]bool, len(routeEntries))
-			for _, r := range routeEntries {
-				if r.Readiness == nil || deployFlag {
-					continue
-				}
-				scheme := "http"
-				if r.BackendTLS {
-					scheme = "https"
-				}
-				targetURL := scheme + "://" + r.Upstream + r.Readiness.Path
-				fmt.Printf("%s %s %s\n",
-					colorLabel.Sprint("waiting for"),
-					colorHost.Sprint(r.Host),
-					colorLabel.Sprintf("(%s)", targetURL),
-				)
-				prober := &health.HTTPProber{TargetURL: targetURL}
-				if r.Readiness.Timeout != "" {
-					prober.Timeout, _ = time.ParseDuration(r.Readiness.Timeout)
-				}
-				if r.Readiness.Interval != "" {
-					prober.Interval, _ = time.ParseDuration(r.Readiness.Interval)
-				}
-				ready, err := prober.Probe(context.Background())
-				if err != nil {
-					return fmt.Errorf("readiness probe for %s: %w", r.Host, err)
-				}
-				if !ready {
-					fmt.Printf("%s readiness timeout (%s) — registering route anyway\n",
-						colorWarning.Sprint("warning:"), targetURL)
-				}
-				healthyRoutes[r.Host] = ready
-			}
-
-			var reqs []daemon.RegisterRequest
-			for _, r := range routes {
-				req := daemon.RegisterRequest{
-					Host:     r.Host,
-					Upstream: r.Upstream,
-					Project:  r.Project,
-					Owner:    "project-file",
-					TTL:      r.TTL.String(),
-				}
-				if err := c.Register(context.Background(), req); err != nil {
-					return fmt.Errorf("register %s: %w", r.Host, err)
-				}
-				suffix := ""
-				if healthyRoutes[r.Host] {
-					suffix = colorLabel.Sprint(" (healthy)")
-				}
-				fmt.Printf("registered %s %s %s%s\n", colorHost.Sprint(r.Host), colorLabel.Sprint("->"), r.Upstream, suffix)
-				reqs = append(reqs, req)
-			}
-
-			if !watch {
-				return nil
-			}
-
-			// Heartbeat loop — renew leases at half the TTL interval. Routes
-			// from a project file share the same default TTL, so the first
-			// positive TTL is representative.
-			interval := 15 * time.Second
-			for _, r := range routes {
-				if r.TTL > 0 {
-					interval = r.TTL / 2
-					break
-				}
-			}
-
-			fmt.Printf("Watching with heartbeat every %s (Ctrl-C to stop)\n", interval)
-			ctx, cancel := signal.NotifyContext(context.Background(),
-				os.Interrupt, syscall.SIGTERM)
-			defer cancel()
-
-			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-			c.Heartbeat(ctx, reqs, interval, logger)
-
-			// On exit, routes will expire naturally via TTL.
-			fmt.Println("Stopped. Routes will expire when their TTL elapses.")
-			return nil
+			// Shared bring-up sequencing (cluster resolve + dependency provision +
+			// optional deploy + health gate + route register + heartbeat). The same
+			// path serves `de compose up` over a Composition resource.
+			return runResourceUp(cmd, res, file, envOverride, deployFlag, watch)
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "devedge.yaml", "project config file")

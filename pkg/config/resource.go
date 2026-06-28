@@ -17,8 +17,9 @@ import (
 // kind is additive: implement its decoder + the Resource interface and add one
 // case (and one supportedKinds entry) below — nothing else changes.
 //
-//	Config  -> ParseProject  (existing, lenient decode; back-compat surface)
-//	Service -> ParseService  (strict decode; typo protection)
+//	Config      -> ParseProject     (existing, lenient decode; back-compat surface)
+//	Service     -> ParseService     (strict decode; typo protection)
+//	Composition -> ParseComposition (strict decode; composed-suite host, WS-012)
 
 // KindService is the resource kind for service configs. (Kind == "Config" for
 // the existing project config, declared in project.go.)
@@ -27,7 +28,7 @@ const KindService = "Service"
 // supportedKinds is the stable, ordered set of kinds ParseResource accepts.
 // It backs the "supported kinds" listing in dispatch error messages; keep it in
 // sync with the switch in ParseResource.
-var supportedKinds = []string{Kind, KindService}
+var supportedKinds = []string{Kind, KindService, KindComposition}
 
 // Resource is the CLI's polymorphic view over any project-file kind. Both
 // ProjectConfig (kind: Config) and ServiceConfig (kind: Service) satisfy it.
@@ -110,6 +111,12 @@ func ParseResource(data []byte) (Resource, error) {
 			return nil, err
 		}
 		return svc, nil
+	case KindComposition:
+		comp, err := ParseComposition(data)
+		if err != nil {
+			return nil, err
+		}
+		return comp, nil
 	default:
 		return nil, fmt.Errorf("resource config: unsupported kind %q (supported kinds: %s)",
 			tm.Kind, strings.Join(supportedKinds, ", "))
