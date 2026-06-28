@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/infobloxopen/devedge/internal/compose"
+	"github.com/infobloxopen/devedge/internal/helm"
 	"github.com/infobloxopen/devedge/pkg/config"
 )
 
@@ -362,17 +364,102 @@ cluster-resolve + dependency-provision + route-register sequencing as
 	return cmd
 }
 
-// composeChartCmd is the P6 stub: deploy rendering is a later phase.
+// composeChartCmd renders deploy artifacts for the composition (WS-012 P6).
+//
+// It maps the Composition resource onto one or more Helm service-chart workloads
+// via the three topologies defined in internal/compose.ComposeChart:
+//
+//   - single-binary (default): ONE Deployment + one Ingress per member route.
+//   - multi-daemon:            one Deployment per member + member-owned routes.
+//   - hybrid:                  composed binary unless a member declares
+//     failurePolicy: dedicated-required (→ its own Deployment).
+//
+// The shared DB (spec.database) is provisioned ONCE, expressed as a DependencyClaim
+// in each workload's chart. Module-namespace isolation (schema wiring) is reflected
+// in the values as compositionSchemas; the servicekit host performs the actual
+// runtime namespacing. Helm is used for rendering (same ChartService as
+// `de project chart`) — no new chart engine.
 func composeChartCmd() *cobra.Command {
-	var file string
+	var file, out, modeFlag string
 	cmd := &cobra.Command{
 		Use:   "chart",
-		Short: "Render deploy artifacts for the composition (not yet implemented — P6)",
+		Short: "Render Helm deploy artifacts for the composition (WS-012 P6)",
+		Long: `Render Helm deploy artifacts for a 'kind: Composition' from a single
+descriptor set, supporting three deployment topologies:
+
+  single-binary  — ONE Deployment running the composed binary + one Ingress per
+                   member route. (default; also set via spec.runtime.mode)
+  multi-daemon   — one Deployment per member module with member-owned routes.
+  hybrid         — composed binary for most members; members with
+                   failurePolicy: dedicated-required get their own Deployment.
+
+The shared database (spec.database) is provisioned ONCE and expressed as a
+DependencyClaim in each workload's chart. Module-namespace isolation is reflected
+in the values (compositionSchemas) — the servicekit runtime performs the actual
+schema namespacing. Rendering reuses the 'service' embedded chart (same path as
+'de project chart').`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("de compose chart is not yet implemented (WS-012 P6 — deploy rendering)")
+			if err := requireTools("helm"); err != nil {
+				return err
+			}
+			comp, err := loadComposition(file)
+			if err != nil {
+				return err
+			}
+
+			mode := compose.TopologyMode(modeFlag)
+			plan, err := compose.ComposeChart(comp, mode)
+			if err != nil {
+				return fmt.Errorf("compose chart: %w", err)
+			}
+
+			outBase := out
+			if outBase == "" {
+				outBase = "chart-" + comp.Project()
+			}
+			if err := os.MkdirAll(outBase, 0o755); err != nil {
+				return err
+			}
+
+			w := cmd.OutOrStdout()
+			fmt.Fprintf(w, "%s composition %s in %s mode\n",
+				colorSuccess.Sprint("rendering"), colorHost.Sprint(comp.Project()), colorLabel.Sprint(string(plan.Mode)))
+
+			h := helm.New("")
+			for i := range plan.Workloads {
+				wl := plan.Workloads[i]
+				vals := wl.ToHelmValues()
+
+				// Write the chart template files into a per-workload subdirectory.
+				wlDir := filepath.Join(outBase, wl.Name)
+				if err := helm.WriteChart(helm.ChartService, wlDir); err != nil {
+					return fmt.Errorf("write chart for workload %s: %w", wl.Name, err)
+				}
+				// Write the composition-specific values.yaml alongside the chart.
+				valData, err := yaml.Marshal(vals)
+				if err != nil {
+					return fmt.Errorf("marshal values for %s: %w", wl.Name, err)
+				}
+				if err := os.WriteFile(filepath.Join(wlDir, "values.yaml"), valData, 0o644); err != nil {
+					return fmt.Errorf("write values for %s: %w", wl.Name, err)
+				}
+				// Lint: the same gate `de project chart` runs.
+				if err := h.Lint(cmd.Context(), wlDir); err != nil {
+					return fmt.Errorf("generated chart for %s failed helm lint: %w", wl.Name, err)
+				}
+				fmt.Fprintf(w, "  %s %s → %s (modules: %s)\n",
+					colorSuccess.Sprint("wrote"), colorHost.Sprint(wl.Name), wlDir,
+					colorLabel.Sprint(strings.Join(wl.Modules, ",")))
+			}
+
+			fmt.Fprintf(w, "%s helm lint passed; workloads: %d\n",
+				colorSuccess.Sprint("ok"), len(plan.Workloads))
+			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "composition.yaml", "composition config file")
+	cmd.Flags().StringVarP(&out, "out", "o", "", "output base directory (default: chart-<name>)")
+	cmd.Flags().StringVar(&modeFlag, "mode", "", "topology override: single-binary | multi-daemon | hybrid (default: from spec.runtime.mode)")
 	return cmd
 }
 

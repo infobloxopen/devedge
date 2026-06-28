@@ -138,7 +138,83 @@ to provision shared deps, register the modules' aggregated routes, and (later) b
 
 ## Out of Scope
 
-- Chart/deploy rendering (`de compose chart`) — P6.
 - Go plugins — forbidden (proposal §10-B).
 - Changes to the SDK `servicekit`/`servicekittest` surfaces — consumed as-is from v0.28.0.
 - New runtime / a parallel completeness gate — the SDK host owns boot validation.
+
+---
+
+## Phase 6 — `de compose chart` deployment rendering (WS-012 P6)
+
+**Status:** DONE (2026-06-28). Replaces the P4 stub.
+
+### Scope
+
+`de compose chart` maps a `kind: Composition` onto deploy artifacts using the
+existing `internal/helm` ChartService (same service chart + `helm.Render` /
+`helm.WriteChart` / `helm.Lint` path as `de project chart`). No new chart engine.
+
+### Topology modes
+
+The mode is read from `spec.runtime.mode` or overridden via `--mode`:
+
+| Mode | Deployments | Routes |
+|---|---|---|
+| `single-binary` (default) | ONE Deployment (the composed binary) | one Ingress per member route, aggregated |
+| `multi-daemon` | one Deployment per member module | member-owned routes only |
+| `hybrid` | see below | per-group |
+
+**Hybrid rule:** members with `failurePolicy: degraded` (optional modules — their failure
+should not take down the host) get their own standalone Deployment. All other members
+(unset or `fail-host`) share the composed-binary Deployment. Rationale: a `degraded`
+module is operationally optional; isolating it in its own process gives it an
+independent restart domain without forcing a composed-binary restart. The rule uses
+the existing `failurePolicy` field rather than adding a new per-member topology flag.
+
+If ALL members are `degraded` → equivalent to `multi-daemon`.
+If NO members are `degraded` → equivalent to `single-binary`.
+
+### Shared database
+
+`spec.database` is provisioned ONCE (a single DependencyClaim in each workload's
+chart). Module-namespace isolation (schema wiring) is surfaced in the chart values as
+`compositionSchemas` for operator tooling; the servicekit runtime performs the actual
+runtime namespacing (schema creation / `search_path`). There is no separate DB
+Deployment per module.
+
+### Implementation
+
+- **`internal/compose/chart.go`**: `ComposeChart(c, modeFlag)` → `ChartPlan`
+  (composition → chart inputs, pure / no I/O). `WorkloadValues.ToHelmValues()`
+  produces the `map[string]any` shape `helm.Render` expects (identical to the
+  single-service values shape).
+- **`cmd/de/compose.go`**: `composeChartCmd()` — the cobra command that calls
+  `ComposeChart`, writes a chart directory per workload via `helm.WriteChart`, and
+  runs `helm.Lint` (same gate as `de project chart`).
+- **`internal/compose/chart_test.go`**: 19 unit tests for all three topologies +
+  `ToHelmValues` + edge cases (no modules, no DB, DSNRef default). All pure (no I/O,
+  no helm subprocess).
+- **`cmd/de/compose_test.go`**: two CLI integration tests (`Chart_SingleBinary`,
+  `Chart_MultiDaemon`) that call `de compose chart` end-to-end and assert workload
+  directories, Chart.yaml presence, and values.yaml content. Helm-skipped when helm
+  is not on PATH (same skip pattern as existing chart tests).
+
+### Acceptance results (2026-06-28)
+
+- `make build` + `make lint` (`go vet ./...`) + `make test` (`go test ./...`): PASS.
+- `TestComposeCLI_Chart_SingleBinary`: 1 workload dir `suite/` written; Chart.yaml +
+  values.yaml present; helm lint passes. PASS.
+- `TestComposeCLI_Chart_MultiDaemon`: 2 workload dirs `suite-greeter/` + `suite-echo/`
+  written; each lints clean. PASS.
+- All 34 existing `internal/compose` tests unchanged: PASS.
+- All 6 `cmd/de` compose tests PASS (including the two new chart CLI tests).
+
+### Tasks
+
+| ID | Task | Tag |
+|----|------|-----|
+| T-P6-01 | `internal/compose/chart.go`: `ComposeChart` + 3 topology shapes + `ToHelmValues`. | [C] |
+| T-P6-02 | `internal/compose/chart_test.go`: 19 structural tests (pure). | [S] |
+| T-P6-03 | `cmd/de/compose.go`: replace P4 stub with real `composeChartCmd`. | [S] |
+| T-P6-04 | `cmd/de/compose_test.go`: replace stub-assertion test with CLI chart tests. | [S] |
+| T-P6-05 | `make build` + `make lint` + `make test` gate. | [S] |

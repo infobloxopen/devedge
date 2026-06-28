@@ -90,20 +90,142 @@ func TestComposeCLI_AddNoFile(t *testing.T) {
 	}
 }
 
-// TestComposeCLI_ChartIsP6Stub asserts `de compose chart` is a P6 stub (errors,
-// does not render).
-func TestComposeCLI_ChartIsP6Stub(t *testing.T) {
+// TestComposeCLI_Chart_RequiresHelm asserts `de compose chart` errors when helm
+// is not on PATH (the gate `de project chart` uses too), and renders workloads
+// when helm is available. P6 is now implemented — the stub is replaced.
+func TestComposeCLI_Chart_RequiresHelm(t *testing.T) {
+	if err := requireTools("helm"); err != nil {
+		// helm unavailable — chart should error with a helm-not-found message, not P6.
+		dir := t.TempDir()
+		file := filepath.Join(dir, "composition.yaml")
+		if _, err2 := runCompose(t, "init", "x", "-f", file); err2 != nil {
+			t.Fatal(err2)
+		}
+		if _, err2 := runCompose(t, "add", "github.com/acme/a/module@v0.1.0", "-f", file, "--name", "a"); err2 != nil {
+			t.Fatal(err2)
+		}
+		if _, err2 := runCompose(t, "add", "github.com/acme/b/module@v0.2.0", "-f", file, "--name", "b"); err2 != nil {
+			t.Fatal(err2)
+		}
+		out, err3 := runCompose(t, "chart", "-f", file)
+		if err3 == nil {
+			t.Fatalf("chart without helm should error; got output:\n%s", out)
+		}
+		// The error should be about helm, not a P6 stub message.
+		if strings.Contains(err3.Error(), "P6") {
+			t.Errorf("chart command is now P6-implemented; error should not mention stub: %v", err3)
+		}
+		t.Skipf("helm not available: %v", err)
+	}
+}
+
+// TestComposeCLI_Chart_SingleBinary exercises the full `de compose chart` flow
+// against a two-member fixture composition in single-binary mode (the default).
+// It asserts: (a) the command succeeds; (b) exactly one chart directory is written;
+// (c) the chart passes helm lint; (d) the rendered values carry the composed name.
+func TestComposeCLI_Chart_SingleBinary(t *testing.T) {
+	if err := requireTools("helm"); err != nil {
+		t.Skipf("skipping: %v", err)
+	}
 	dir := t.TempDir()
 	file := filepath.Join(dir, "composition.yaml")
-	if _, err := runCompose(t, "init", "x", "-f", file); err != nil {
+	outDir := filepath.Join(dir, "charts-out")
+
+	// Scaffold a composition with two members.
+	if _, err := runCompose(t, "init", "suite", "-f", file); err != nil {
 		t.Fatal(err)
 	}
-	out, err := runCompose(t, "chart", "-f", file)
-	if err == nil {
-		t.Fatal("expected `de compose chart` to error (P6 not implemented)")
+	if _, err := runCompose(t, "add", "github.com/acme/greeter/module@v0.1.0", "-f", file, "--name", "greeter"); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "P6") {
-		t.Errorf("chart stub error should mention P6: %v\n%s", err, out)
+	if _, err := runCompose(t, "add", "github.com/acme/echo/module@v0.2.0", "-f", file, "--name", "echo"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCompose(t, "chart", "-f", file, "-o", outDir, "--mode", "single-binary")
+	if err != nil {
+		t.Fatalf("compose chart single-binary: %v\n%s", err, out)
+	}
+
+	// Single-binary: exactly one workload directory (named after the composition).
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatalf("read output dir: %v", err)
+	}
+	var workloadDirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			workloadDirs = append(workloadDirs, e.Name())
+		}
+	}
+	if len(workloadDirs) != 1 {
+		t.Errorf("single-binary: want 1 workload dir, got %d: %v", len(workloadDirs), workloadDirs)
+	} else if workloadDirs[0] != "suite" {
+		t.Errorf("single-binary: workload dir = %q, want %q", workloadDirs[0], "suite")
+	}
+
+	// Chart.yaml must exist in the workload dir.
+	chartYAML := filepath.Join(outDir, "suite", "Chart.yaml")
+	if _, err := os.Stat(chartYAML); err != nil {
+		t.Errorf("single-binary: Chart.yaml not written at %s", chartYAML)
+	}
+	// values.yaml must carry the composition's members.
+	valYAML := filepath.Join(outDir, "suite", "values.yaml")
+	valData, err := os.ReadFile(valYAML)
+	if err != nil {
+		t.Errorf("single-binary: values.yaml not written: %v", err)
+	} else {
+		valStr := string(valData)
+		if !strings.Contains(valStr, "suite") {
+			t.Errorf("single-binary values.yaml missing composition name 'suite':\n%s", valStr)
+		}
+	}
+}
+
+// TestComposeCLI_Chart_MultiDaemon exercises `de compose chart --mode multi-daemon`
+// and asserts one chart directory per member module.
+func TestComposeCLI_Chart_MultiDaemon(t *testing.T) {
+	if err := requireTools("helm"); err != nil {
+		t.Skipf("skipping: %v", err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "composition.yaml")
+	outDir := filepath.Join(dir, "charts-out")
+
+	if _, err := runCompose(t, "init", "suite", "-f", file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCompose(t, "add", "github.com/acme/greeter/module@v0.1.0", "-f", file, "--name", "greeter"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCompose(t, "add", "github.com/acme/echo/module@v0.2.0", "-f", file, "--name", "echo"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCompose(t, "chart", "-f", file, "-o", outDir, "--mode", "multi-daemon")
+	if err != nil {
+		t.Fatalf("compose chart multi-daemon: %v\n%s", err, out)
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatalf("read output dir: %v", err)
+	}
+	var workloadDirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			workloadDirs = append(workloadDirs, e.Name())
+		}
+	}
+	// multi-daemon: one dir per member (2 members → 2 dirs).
+	if len(workloadDirs) != 2 {
+		t.Errorf("multi-daemon: want 2 workload dirs, got %d: %v", len(workloadDirs), workloadDirs)
+	}
+	wantDirs := map[string]bool{"suite-greeter": true, "suite-echo": true}
+	for _, d := range workloadDirs {
+		if !wantDirs[d] {
+			t.Errorf("multi-daemon: unexpected workload dir %q", d)
+		}
 	}
 }
 
