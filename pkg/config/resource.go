@@ -28,7 +28,7 @@ const KindService = "Service"
 // supportedKinds is the stable, ordered set of kinds ParseResource accepts.
 // It backs the "supported kinds" listing in dispatch error messages; keep it in
 // sync with the switch in ParseResource.
-var supportedKinds = []string{Kind, KindService, KindComposition}
+var supportedKinds = []string{Kind, KindService, KindComposition, KindCell}
 
 // Resource is the CLI's polymorphic view over any project-file kind. Both
 // ProjectConfig (kind: Config) and ServiceConfig (kind: Service) satisfy it.
@@ -117,6 +117,12 @@ func ParseResource(data []byte) (Resource, error) {
 			return nil, err
 		}
 		return comp, nil
+	case KindCell:
+		cell, err := ParseCell(data)
+		if err != nil {
+			return nil, err
+		}
+		return cell, nil
 	default:
 		return nil, fmt.Errorf("resource config: unsupported kind %q (supported kinds: %s)",
 			tm.Kind, strings.Join(supportedKinds, ", "))

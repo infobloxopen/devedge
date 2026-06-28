@@ -60,6 +60,7 @@ func rootCmd() *cobra.Command {
 		newCmd(),
 		projectCmd(),
 		composeCmd(),
+		cellCmd(),
 		clusterCmd(),
 		ciCmd(),
 		k3dAliasCmd(),
