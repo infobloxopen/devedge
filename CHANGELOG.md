@@ -12,6 +12,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+## [0.4.0] - 2026-06-28
+
+### Added
+
+#### Cell-based development — `de cell` (013-de-cell)
+
+- **`de cell` command group** for cell-based development: deploy version-pinned cells for a
+  subset of tenants and move tenants between cells safely. This is **isolation, not load
+  balancing** — a tenant is pinned to one cell at a time.
+  - `create` / `down` — provision or tear down a per-cell service deployment (a parameterized
+    Helm "service" chart instance; `down --purge-routes` reverts a cell's tenants to the
+    fail-safe default cell).
+  - `assign` — sticky first placement of a tenant on a cell.
+  - `move` — safe, budget-aware tenant move driven by the devedge-sdk move controller
+    (drain-and-cutover with a bounded drain window; the monotonic route-epoch fence preserves
+    tenant state across the cut).
+  - `rebalance` — even-distribution / blast-radius rebalance across cells via a pluggable
+    placement policy (round-robin / least-loaded / sticky), budget-metered.
+  - `status` — routes grouped by cell with each tenant's state, epoch, and remaining budget.
+- **`kind: Cell`** resource for declaring a cell (service, image/version, cell name,
+  controller class) in the existing config family.
+- Routes persist in a file-backed routing table (default `.devedge/cells/routes.json`;
+  `--routes-file` overrides) so the CLI and a running service share the directory. The
+  production etcd / CR-GitOps backend plugs into the same interface.
+
+### Changed
+
+- Bump `devedge-sdk` to **v0.30.0** — the cell-based-development runtime: the synchronous
+  routing plane, the 7-phase tenant-move controller, storage/event fencing, and budget metering.
+
 ## [0.2.0] - 2026-06-20
 
 ### Added
