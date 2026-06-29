@@ -65,6 +65,7 @@ func rootCmd() *cobra.Command {
 		ciCmd(),
 		k3dAliasCmd(),
 		uiCmd(),
+		apiCmd(),
 	)
 
 	applyColoredHelp(root)
