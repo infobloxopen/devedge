@@ -137,7 +137,10 @@ func TestAPIPublishHelp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("api publish --help: %v\n%s", err, out)
 	}
-	for _, keyword := range []string{"--api-id", "--version", "--canonical-repo", "--lifecycle", "--submit", "--skip-generate"} {
+	for _, keyword := range []string{
+		"--api-id", "--version", "--canonical-repo", "--lifecycle", "--submit", "--skip-generate",
+		"--client", "--client-out", "--client-scope", "--publish-client",
+	} {
 		if !strings.Contains(out, keyword) {
 			t.Errorf("--help output missing flag %q:\n%s", keyword, out)
 		}

@@ -40,6 +40,10 @@ func apiPublishCmd() *cobra.Command {
 		serviceDir    string
 		submit        bool
 		skipGenerate  bool
+		client        bool
+		clientOut     string
+		clientScope   string
+		publishClient bool
 	)
 
 	cmd := &cobra.Command{
@@ -58,6 +62,14 @@ Steps performed:
 
 Without --submit the next-step apx commands are printed for you to run manually
 after reviewing the spec and the PR that prepare opens on the canonical repo.
+
+Client generation (opt-in with --client):
+  With --client the command also generates a packaged TypeScript/Angular client
+  from the same openapi/<svc>.openapi.yaml via 'apx client generate', writing an
+  '@<scope>/<svc>-client' npm module to --client-out (default
+  clients/<svc>-client under the service dir). apx orchestrates ng-openapi-gen
+  under the hood. Add --publish-client to publish that module to GitHub Packages
+  via 'apx client publish --dry-run=false' instead of only generating it.
 
 Requires apx on PATH. Install via:
   go install github.com/infobloxopen/apx@latest
@@ -78,10 +90,32 @@ Examples:
     --version v0.1.0 \
     --lifecycle stable \
     --canonical-repo github.com/infobloxopen/apis \
-    --submit`,
+    --submit
+
+  # Prepare + also generate a typed TS/Angular client package:
+  de api publish \
+    --domain platform.data \
+    --api-id openapi/platform.data/orders/v1 \
+    --version v0.1.0 \
+    --canonical-repo github.com/infobloxopen/apis \
+    --client \
+    --client-scope @acme
+
+  # ...and publish the client to GitHub Packages:
+  de api publish \
+    --domain platform.data \
+    --api-id openapi/platform.data/orders/v1 \
+    --version v0.1.0 \
+    --canonical-repo github.com/infobloxopen/apis \
+    --client --client-scope @acme --publish-client`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireTools("apx"); err != nil {
 				return fmt.Errorf("%w\n\nInstall apx: go install github.com/infobloxopen/apx@latest", err)
+			}
+
+			// --publish-client implies --client (you cannot publish without generating).
+			if publishClient {
+				client = true
 			}
 
 			// Resolve the service directory (default: cwd).
@@ -148,6 +182,14 @@ Examples:
 				fmt.Fprintf(cmd.OutOrStdout(), "  # (after the PR is merged on the canonical repo:)\n")
 				fmt.Fprintf(cmd.OutOrStdout(), "  apx release finalize --api %s --version %s\n", apxAPIArg, version)
 			}
+
+			// 4. Optionally generate (or publish) a typed TS/Angular client from
+			// the same flat spec.
+			if client {
+				if err := runClientStep(cmd, dir, srcSpec, apiPath.svc, version, clientOut, clientScope, publishClient); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
@@ -160,6 +202,10 @@ Examples:
 	cmd.Flags().StringVar(&serviceDir, "service-dir", "", "Service root directory (default: current working directory)")
 	cmd.Flags().BoolVar(&submit, "submit", false, "Also run 'apx release submit' after prepare (opens PR)")
 	cmd.Flags().BoolVar(&skipGenerate, "skip-generate", false, "Skip 'make generate'; use the existing openapi/<svc>.openapi.yaml")
+	cmd.Flags().BoolVar(&client, "client", false, "After publishing the spec, also generate a typed TS/Angular client via 'apx client generate'")
+	cmd.Flags().StringVar(&clientOut, "client-out", "", "Output directory for the generated client (default: clients/<svc>-client under the service dir)")
+	cmd.Flags().StringVar(&clientScope, "client-scope", "", "npm scope for the generated client package, e.g. @acme (optional)")
+	cmd.Flags().BoolVar(&publishClient, "publish-client", false, "Publish the client to GitHub Packages via 'apx client publish --dry-run=false' (implies --client)")
 
 	_ = cmd.MarkFlagRequired("api-id")
 	_ = cmd.MarkFlagRequired("version")
@@ -239,6 +285,65 @@ func arrangeSpec(srcSpec, destDir, destSpec string) error {
 	}
 	if err := os.WriteFile(destSpec, data, 0o644); err != nil {
 		return fmt.Errorf("write arranged spec %s: %w", destSpec, err)
+	}
+	return nil
+}
+
+// runClientStep generates (and optionally publishes) a typed TS/Angular client
+// from the flat OpenAPI spec at srcSpec via the apx binary on PATH. It mirrors
+// how the publish flow already execs `apx release`.
+//
+// The generated package is named "<svc>-client" and written to clientOut
+// (default: clients/<svc>-client under the service dir). scope is an optional
+// npm scope (e.g. @acme). version stamps the package. When publish is true it
+// runs `apx client publish --dry-run=false`; otherwise `apx client generate`.
+func runClientStep(cmd *cobra.Command, dir, srcSpec, svc, version, clientOut, scope string, publish bool) error {
+	if _, err := os.Stat(srcSpec); os.IsNotExist(err) {
+		return fmt.Errorf("client: spec not found at %s — run without --skip-generate, or generate the spec first", srcSpec)
+	}
+
+	pkg := svc + "-client"
+	out := clientOut
+	if out == "" {
+		out = filepath.Join("clients", pkg)
+	}
+
+	sub := "generate"
+	if publish {
+		sub = "publish"
+	}
+	args := []string{
+		"client", sub,
+		"--input", srcSpec,
+		"--output", out,
+		"--package", pkg,
+		"--version", version,
+	}
+	if scope != "" {
+		args = append(args, "--scope", scope)
+	}
+	if publish {
+		// 'apx client publish' always builds; --dry-run=false actually publishes
+		// to GitHub Packages (the apx default is a validating dry-run).
+		args = append(args, "--dry-run=false")
+	} else {
+		// 'apx client generate' only writes source unless --build is set; build so
+		// the emitted package's dist/ is present for a local file: consumer.
+		args = append(args, "--build")
+	}
+
+	verb := "generating client"
+	if publish {
+		verb = "publishing client"
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "\n%s: apx %v\n", verb, args)
+	if err := runExec(cmd, dir, "apx", args...); err != nil {
+		return fmt.Errorf("apx client %s: %w", sub, err)
+	}
+
+	if !publish {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nclient generated at %s — consume it locally via a file: link, or publish with --publish-client\n",
+			filepath.Join(dir, out))
 	}
 	return nil
 }
