@@ -5,12 +5,15 @@
 # FeatureFlag-CRD Helm chart (that is the internal preset).
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json ./
+# The scaffold's dev loop and CLI next-steps use pnpm; the image matches.
+RUN corepack enable && corepack prepare pnpm@latest --activate
+COPY package.json pnpm-lock.yaml* ./
 # Install from a registry once the SDK packages are published. For local
-# builds, link the SDK packages first (see README, "Local dev loop").
-RUN npm install --no-audit --no-fund
+# builds, link the SDK packages first (see README, "Local dev loop"). A
+# committed lockfile makes this a reproducible --frozen-lockfile install.
+RUN pnpm install --frozen-lockfile
 COPY . .
-RUN npm run build
+RUN pnpm build
 
 FROM nginx:1.27-alpine
 COPY --from=build /app/dist/{{ .AppID }} /usr/share/nginx/html

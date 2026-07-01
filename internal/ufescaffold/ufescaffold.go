@@ -64,10 +64,17 @@ type Params struct {
 	// ParentDir is the directory the project directory is created in. Empty
 	// defaults to ".". The project root is ParentDir/Name.
 	ParentDir string
-	// Preset, when non-empty, names an overlay applied on top of the base
-	// scaffold after the base is rendered. The public CLI ships no proprietary
-	// preset; a missing/unknown preset is a clear error.
+	// Preset, when non-empty, names a BUILT-IN overlay applied on top of the
+	// base scaffold after the base is rendered. The public CLI ships no
+	// proprietary built-in preset; an unknown preset is a clear error pointing
+	// at --preset-dir.
 	Preset string
+	// PresetDir, when non-empty, is a filesystem path to a preset directory
+	// containing a canonical preset.json (see PresetManifest). Its overlay is
+	// applied on top of the base scaffold. This is how proprietary presets
+	// (e.g. infoblox-cto from the private repo) are applied. Preset and
+	// PresetDir are mutually exclusive.
+	PresetDir string
 }
 
 // templateData is what the .tmpl files and path placeholders see.
@@ -124,6 +131,9 @@ func Render(p Params) error {
 		p.ParentDir = "."
 	}
 
+	if p.Preset != "" && p.PresetDir != "" {
+		return fmt.Errorf("--preset and --preset-dir are mutually exclusive; pass one")
+	}
 	// A missing/unknown preset must fail before we write anything.
 	if p.Preset != "" {
 		if err := checkPresetExists(p.Preset); err != nil {
@@ -162,8 +172,14 @@ func Render(p Params) error {
 	}
 
 	// Apply the preset overlay on top of the base (add/override files).
-	if p.Preset != "" {
+	switch {
+	case p.Preset != "":
 		if err := applyPreset(root, p.Preset, data); err != nil {
+			cleanup()
+			return err
+		}
+	case p.PresetDir != "":
+		if err := applyPresetDir(root, p.PresetDir, data); err != nil {
 			cleanup()
 			return err
 		}

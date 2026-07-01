@@ -15,10 +15,16 @@ already `{{ .AppID }}`.
 - **The route matches.** The app route (`app-routing.module.ts`), the manifest
   `routes` (`metadata.ts`), and the nav item `path` all agree on `/{{ .AppID }}`.
   No accidental `path: ''` that never activates.
-- **Auth is wired.** `main.ufe.ts` provides the shell-owned `SessionProvider`
-  into Angular DI via `provideDevedgeSession(props.session)`; HttpClient is
-  registered with the `bearerAuthInterceptor`, so API calls carry the Bearer
-  token. This uFE never authenticates — the shell owns OIDC.
+- **Auth is wired.** `main.ufe.ts` bootstraps `AppModule` with
+  `platformBrowserDynamic`, so it provides the shell-owned `SessionProvider`
+  into Angular DI as a platform `StaticProvider`:
+  `{ provide: SESSION_PROVIDER, useValue: props.session }`. (The alternative
+  `provideDevedgeSession(props.session)` returns `EnvironmentProviders` and is
+  the path for a standalone `bootstrapApplication(...)` app — it is not usable
+  as a `platformBrowserDynamic` StaticProvider. Either way the injected token
+  is identical.) HttpClient is registered with the `bearerAuthInterceptor`, so
+  API calls carry the Bearer token. This uFE never authenticates — the shell
+  owns OIDC.
 - **The webpack/`angular.json` wiring is clean.** A single
   `@angular-builders/custom-webpack:browser` build using `extra-webpack.config.js`;
   no dead `single-spa` architect targets pointing at a non-existent

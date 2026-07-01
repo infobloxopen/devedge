@@ -3,6 +3,7 @@ package ufescaffold
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -130,6 +131,10 @@ func TestRender_PlaceholderFreeTree(t *testing.T) {
 		t.Error("app-routing.module.ts: app route does not match 'demo'")
 	}
 
+	// HomeComponent (routed by app-routing) MUST be declared in the AppModule,
+	// or `ng build` (AOT) fails "HomeComponent is not part of any NgModule".
+	assertHomeComponentDeclared(t, root)
+
 	// The chart dir is named from the uFE name (no orphaned hardcoded dir).
 	checkFileContains(t, filepath.Join(root, "charts/demo-ufe/Chart.yaml"), "name: demo-ufe")
 
@@ -175,6 +180,140 @@ func TestRender_UnknownPresetFails(t *testing.T) {
 	// Nothing written.
 	if entries, _ := os.ReadDir(parent); len(entries) != 0 {
 		t.Errorf("unknown preset created %d entries, want 0", len(entries))
+	}
+}
+
+// TestRender_HomeComponentDeclared is a focused structural guard for the AOT
+// regression: HomeComponent is routed, so it must be declared in the AppModule.
+func TestRender_HomeComponentDeclared(t *testing.T) {
+	parent := t.TempDir()
+	if err := Render(Params{Name: "widgets", ParentDir: parent}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	assertHomeComponentDeclared(t, filepath.Join(parent, "widgets"))
+}
+
+// declarationsRe extracts the AppModule @NgModule declarations array contents.
+var declarationsRe = regexp.MustCompile(`declarations:\s*\[([^\]]*)\]`)
+
+// assertHomeComponentDeclared fails unless AppModule imports HomeComponent AND
+// lists it in the @NgModule declarations array.
+func assertHomeComponentDeclared(t *testing.T, root string) {
+	t.Helper()
+	mod := readFile(t, filepath.Join(root, "src/app/app.module.ts"))
+	if !strings.Contains(mod, `import { HomeComponent } from './home.component'`) {
+		t.Error("app.module.ts: does not import HomeComponent")
+	}
+	m := declarationsRe.FindStringSubmatch(mod)
+	if m == nil {
+		t.Fatalf("app.module.ts: no @NgModule declarations array found\n%s", mod)
+	}
+	if !strings.Contains(m[1], "HomeComponent") {
+		t.Errorf("app.module.ts: HomeComponent not in declarations %q — ng build (AOT) would fail", strings.TrimSpace(m[1]))
+	}
+}
+
+// writeFile is a test helper that writes a file, creating parent dirs.
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRender_PresetDirOverlays verifies --preset-dir renders a fixture preset
+// through the base template data and overrides a base file at the target path.
+func TestRender_PresetDirOverlays(t *testing.T) {
+	presetDir := t.TempDir()
+	writeFile(t, filepath.Join(presetDir, "preset.json"), `{
+	  "name": "fixture",
+	  "description": "test overlay",
+	  "files": [
+	    { "path": "README.md", "template": "readme.tmpl" },
+	    { "path": "src/extra.ts", "template": "extra.ts" }
+	  ]
+	}`)
+	// A templated overlay file (sees the same data as the base).
+	writeFile(t, filepath.Join(presetDir, "readme.tmpl"), "# {{ .TitleName }} preset overlay\n")
+	// A verbatim overlay file.
+	writeFile(t, filepath.Join(presetDir, "extra.ts"), "export const EXTRA = true;\n")
+
+	parent := t.TempDir()
+	if err := Render(Params{Name: "over", ParentDir: parent, PresetDir: presetDir}); err != nil {
+		t.Fatalf("Render with --preset-dir: %v", err)
+	}
+	root := filepath.Join(parent, "over")
+
+	// README.md was overridden by the (rendered) overlay.
+	readme := readFile(t, filepath.Join(root, "README.md"))
+	if !strings.Contains(readme, "Over preset overlay") {
+		t.Errorf("README.md not overridden by preset overlay (TitleName not rendered): %q", readme)
+	}
+	// The new file was added.
+	extra := readFile(t, filepath.Join(root, "src/extra.ts"))
+	if !strings.Contains(extra, "EXTRA = true") {
+		t.Errorf("preset did not add src/extra.ts: %q", extra)
+	}
+	// A base file the preset did NOT touch still exists.
+	if _, err := os.Stat(filepath.Join(root, "package.json")); err != nil {
+		t.Errorf("preset removed an untouched base file: %v", err)
+	}
+}
+
+// TestRender_PresetDirMalformed verifies a malformed/missing preset.json fails
+// loud and writes nothing.
+func TestRender_PresetDirMalformed(t *testing.T) {
+	cases := []struct {
+		name, json, wantSub string
+	}{
+		{"badjson", `{ not json`, "parsing preset manifest"},
+		{"noname", `{ "files": [ {"path":"a","template":"a"} ] }`, `missing "name"`},
+		{"emptyfiles", `{ "name": "x", "files": [] }`, `"files" is empty`},
+		{"nopath", `{ "name": "x", "files": [ {"template":"a"} ] }`, `missing "path"`},
+		{"escape", `{ "name": "x", "files": [ {"path":"../evil","template":"a"} ] }`, "stay within"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			presetDir := t.TempDir()
+			writeFile(t, filepath.Join(presetDir, "preset.json"), tc.json)
+			parent := t.TempDir()
+			err := Render(Params{Name: "over", ParentDir: parent, PresetDir: presetDir})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantSub)
+			}
+			if entries, _ := os.ReadDir(parent); len(entries) != 0 {
+				t.Errorf("malformed preset left %d entries behind, want 0", len(entries))
+			}
+		})
+	}
+}
+
+// TestRender_PresetDirMissingManifest verifies a preset dir without preset.json
+// fails loud.
+func TestRender_PresetDirMissingManifest(t *testing.T) {
+	presetDir := t.TempDir() // no preset.json
+	parent := t.TempDir()
+	err := Render(Params{Name: "over", ParentDir: parent, PresetDir: presetDir})
+	if err == nil {
+		t.Fatal("expected error for missing preset.json, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading preset manifest") {
+		t.Errorf("error should name the missing manifest: %v", err)
+	}
+}
+
+// TestRender_PresetAndPresetDirExclusive verifies both flags together error.
+func TestRender_PresetAndPresetDirExclusive(t *testing.T) {
+	parent := t.TempDir()
+	err := Render(Params{Name: "over", ParentDir: parent, Preset: "x", PresetDir: parent})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutually-exclusive error, got %v", err)
 	}
 }
 
