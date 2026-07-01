@@ -71,12 +71,14 @@ type ReadinessSpec struct {
 
 // RouteEntry represents a single route in the project config.
 type RouteEntry struct {
-	Host       string         `yaml:"host"`
-	Upstream   string         `yaml:"upstream"`
-	Protocol   string         `yaml:"protocol,omitempty"`   // "http" (default) or "tcp"
-	BackendTLS bool           `yaml:"backendTLS,omitempty"` // TLS to upstream
-	Mode       string         `yaml:"mode,omitempty"`
-	Readiness  *ReadinessSpec `yaml:"readiness,omitempty"` // optional health probe (010)
+	Host        string         `yaml:"host"`
+	Upstream    string         `yaml:"upstream"`
+	Protocol    string         `yaml:"protocol,omitempty"`    // "http" (default) or "tcp"
+	BackendTLS  bool           `yaml:"backendTLS,omitempty"`  // TLS to upstream
+	Path        string         `yaml:"path,omitempty"`        // URL path prefix; "" = host catch-all
+	StripPrefix bool           `yaml:"stripPrefix,omitempty"` // trim path before forwarding
+	Mode        string         `yaml:"mode,omitempty"`
+	Readiness   *ReadinessSpec `yaml:"readiness,omitempty"` // optional health probe (010)
 }
 
 // LoadProject reads and parses a devedge.yaml file.
@@ -131,13 +133,15 @@ func (c *ProjectConfig) ToRoutes() ([]types.Route, error) {
 	routes := make([]types.Route, 0, len(c.Spec.Routes))
 	for _, entry := range c.Spec.Routes {
 		routes = append(routes, types.Route{
-			Host:       entry.Host,
-			Upstream:   entry.Upstream,
-			Protocol:   types.Protocol(entry.Protocol),
-			BackendTLS: entry.BackendTLS,
-			Project:    c.Metadata.Name,
-			Source:     "project-file",
-			TTL:        ttl,
+			Host:        entry.Host,
+			Upstream:    entry.Upstream,
+			Protocol:    types.Protocol(entry.Protocol),
+			BackendTLS:  entry.BackendTLS,
+			Path:        entry.Path,
+			StripPrefix: entry.StripPrefix,
+			Project:     c.Metadata.Name,
+			Source:      "project-file",
+			TTL:         ttl,
 		})
 	}
 	return routes, nil

@@ -84,8 +84,8 @@ func versionCmd() *cobra.Command {
 }
 
 func registerCmd() *cobra.Command {
-	var project, owner, ttl, protocol string
-	var backendTLS bool
+	var project, owner, ttl, protocol, path string
+	var backendTLS, stripPrefix bool
 
 	cmd := &cobra.Command{
 		Use:   "register HOST UPSTREAM",
@@ -94,8 +94,16 @@ func registerCmd() *cobra.Command {
 http://127.0.0.1:3000. For TCP services (databases, gRPC, binary protocols),
 use --protocol tcp and specify the backend as host:port.
 
+One host can hold several HTTP routes distinguished by URL path prefix
+(--path). A request is matched to the route with the longest matching prefix;
+a route with no --path is the host's catch-all. Use --strip-prefix when the
+backend serves paths without the prefix (e.g. an "/api" route to a gateway
+that answers on "/v1/...").
+
 Examples:
   de register api.foo.dev.test http://127.0.0.1:3000
+  de register app.dev.test http://127.0.0.1:3000                       # shell (catch-all)
+  de register app.dev.test http://127.0.0.1:8080 --path /api --strip-prefix
   de register postgres.foo.dev.test 127.0.0.1:5432 --protocol tcp
   de register redis.foo.dev.test 127.0.0.1:6379 --protocol tcp
   de register secure-db.foo.dev.test 127.0.0.1:5432 --protocol tcp --backend-tls`,
@@ -103,13 +111,15 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
 			return c.Register(context.Background(), daemon.RegisterRequest{
-				Host:       args[0],
-				Upstream:   args[1],
-				Protocol:   protocol,
-				BackendTLS: backendTLS,
-				Project:    project,
-				Owner:      owner,
-				TTL:        ttl,
+				Host:        args[0],
+				Upstream:    args[1],
+				Protocol:    protocol,
+				BackendTLS:  backendTLS,
+				Path:        path,
+				StripPrefix: stripPrefix,
+				Project:     project,
+				Owner:       owner,
+				TTL:         ttl,
 			})
 		},
 	}
@@ -118,39 +128,53 @@ Examples:
 	cmd.Flags().StringVar(&ttl, "ttl", "", "lease TTL (e.g. 30s)")
 	cmd.Flags().StringVar(&protocol, "protocol", "", "routing protocol: http (default) or tcp")
 	cmd.Flags().BoolVar(&backendTLS, "backend-tls", false, "use TLS to connect to upstream")
+	cmd.Flags().StringVar(&path, "path", "", "URL path prefix; empty is the host's catch-all")
+	cmd.Flags().BoolVar(&stripPrefix, "strip-prefix", false, "strip --path from the request path before forwarding")
 	return cmd
 }
 
 func unregisterCmd() *cobra.Command {
-	return &cobra.Command{
+	var path string
+	cmd := &cobra.Command{
 		Use:   "unregister HOST",
 		Short: "Remove a route",
-		Args:  cobra.ExactArgs(1),
+		Long: `Remove routes for HOST. Without --path this removes ALL routes
+registered under HOST; --path removes only that one (host, path) route.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
-			return c.Deregister(context.Background(), args[0])
+			return c.Deregister(context.Background(), args[0], path)
 		},
 	}
+	cmd.Flags().StringVar(&path, "path", "", "remove only the route registered under this path prefix")
+	return cmd
 }
 
 func renewCmd() *cobra.Command {
-	return &cobra.Command{
+	var path string
+	cmd := &cobra.Command{
 		Use:   "renew HOST",
 		Short: "Renew a route's lease",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
 			// Lookup the current route and re-register it to renew the lease.
-			route, err := c.Lookup(context.Background(), args[0])
+			// --path selects a specific (host, path) route when the host holds
+			// several; without it, the host's catch-all is renewed.
+			route, err := c.Lookup(context.Background(), args[0], path)
 			if err != nil {
 				return fmt.Errorf("lookup %s: %w", args[0], err)
 			}
 			err = c.Register(context.Background(), daemon.RegisterRequest{
-				Host:     route.Host,
-				Upstream: route.Upstream,
-				Project:  route.Project,
-				Owner:    route.Owner,
-				TTL:      route.TTL.String(),
+				Host:        route.Host,
+				Upstream:    route.Upstream,
+				Protocol:    string(route.Protocol),
+				BackendTLS:  route.BackendTLS,
+				Path:        route.Path,
+				StripPrefix: route.StripPrefix,
+				Project:     route.Project,
+				Owner:       route.Owner,
+				TTL:         route.TTL.String(),
 			})
 			if err != nil {
 				return err
@@ -159,6 +183,8 @@ func renewCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&path, "path", "", "renew the route registered under this path prefix")
+	return cmd
 }
 
 func lsCmd() *cobra.Command {
@@ -216,13 +242,17 @@ func statusCmd() *cobra.Command {
 }
 
 func inspectCmd() *cobra.Command {
-	return &cobra.Command{
+	var path string
+	cmd := &cobra.Command{
 		Use:   "inspect HOST",
 		Short: "Show details for a route",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show details for a route on HOST. When a host holds several routes,
+--path selects one by its path prefix; without it the host's catch-all (or its
+"/" match) is shown.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
-			route, err := c.Lookup(context.Background(), args[0])
+			route, err := c.Lookup(context.Background(), args[0], path)
 			if err != nil {
 				return err
 			}
@@ -231,6 +261,8 @@ func inspectCmd() *cobra.Command {
 			return enc.Encode(route)
 		},
 	}
+	cmd.Flags().StringVar(&path, "path", "", "inspect the route registered under this path prefix")
+	return cmd
 }
 
 func projectCmd() *cobra.Command {

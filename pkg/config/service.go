@@ -255,12 +255,14 @@ func (c *ServiceConfig) ToRoutes() ([]types.Route, error) {
 	routes := make([]types.Route, 0, len(c.Spec.Routes))
 	for _, entry := range c.Spec.Routes {
 		routes = append(routes, types.Route{
-			Host:       entry.Host,
-			Upstream:   entry.Upstream,
-			Protocol:   types.Protocol(entry.Protocol),
-			BackendTLS: entry.BackendTLS,
-			Project:    c.Metadata.Name,
-			Source:     "project-file",
+			Host:        entry.Host,
+			Upstream:    entry.Upstream,
+			Protocol:    types.Protocol(entry.Protocol),
+			BackendTLS:  entry.BackendTLS,
+			Path:        entry.Path,
+			StripPrefix: entry.StripPrefix,
+			Project:     c.Metadata.Name,
+			Source:      "project-file",
 		})
 	}
 	return routes, nil
