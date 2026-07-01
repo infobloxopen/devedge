@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -273,7 +274,7 @@ func (p *Proxy) handler() http.Handler {
 			host = h
 		}
 
-		route, ok := p.reg.Lookup(host)
+		route, ok := p.reg.Lookup(host, r.URL.Path)
 		if !ok {
 			http.Error(w, "no route for host: "+host, http.StatusBadGateway)
 			return
@@ -290,6 +291,16 @@ func (p *Proxy) handler() http.Handler {
 				req.URL.Scheme = upstream.Scheme
 				req.URL.Host = upstream.Host
 				req.Host = host
+				// When the matched route strips its prefix, trim Path from the
+				// request path before forwarding (e.g. "/api/x" → "/x" behind an
+				// "/api" gateway). Guard against an empty result → "/".
+				if route.StripPrefix && route.Path != "" {
+					trimmed := strings.TrimPrefix(req.URL.Path, route.Path)
+					if trimmed == "" || trimmed[0] != '/' {
+						trimmed = "/" + trimmed
+					}
+					req.URL.Path = trimmed
+				}
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				p.logger.Error("proxy error", "host", host, "upstream", upstream, "err", err)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 
 	"github.com/infobloxopen/devedge/internal/daemon"
 	"github.com/infobloxopen/devedge/internal/depruntime"
@@ -65,10 +66,16 @@ func (c *Client) List(ctx context.Context) ([]types.Route, error) {
 	return routes, err
 }
 
-// Lookup returns a route by host.
-func (c *Client) Lookup(ctx context.Context, host string) (types.Route, error) {
+// Lookup returns a route by host. An optional path narrows the lookup to a
+// specific (host, path) route; omitting it returns the host's catch-all (or
+// its "/" match).
+func (c *Client) Lookup(ctx context.Context, host string, path ...string) (types.Route, error) {
 	var route types.Route
-	err := c.get(ctx, "/v1/routes/"+host, &route)
+	p := "/v1/routes/" + host
+	if len(path) > 0 && path[0] != "" {
+		p += "?path=" + url.QueryEscape(path[0])
+	}
+	err := c.get(ctx, p, &route)
 	return route, err
 }
 
@@ -87,9 +94,14 @@ func (c *Client) Register(ctx context.Context, req daemon.RegisterRequest) error
 	return readError(resp)
 }
 
-// Deregister removes a route by host.
-func (c *Client) Deregister(ctx context.Context, host string) error {
-	resp, err := c.do(ctx, "DELETE", "/v1/routes/"+host, nil)
+// Deregister removes routes by host. With no path it removes ALL routes under
+// the host; an optional path removes just that one (host, path) route.
+func (c *Client) Deregister(ctx context.Context, host string, path ...string) error {
+	p := "/v1/routes/" + host
+	if len(path) > 0 && path[0] != "" {
+		p += "?path=" + url.QueryEscape(path[0])
+	}
+	resp, err := c.do(ctx, "DELETE", p, nil)
 	if err != nil {
 		return err
 	}

@@ -362,6 +362,42 @@ spec:
 	}
 }
 
+func TestParseService_pathRouting(t *testing.T) {
+	// The Service decoder is strict (unknown fields rejected), so this also
+	// proves path:/stripPrefix: are recognized RouteEntry fields.
+	input := []byte(`
+apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Service
+metadata:
+  name: app
+spec:
+  dev:
+    hostname: app.dev.test
+  routes:
+    - host: app.dev.test
+      upstream: http://127.0.0.1:3000
+    - host: app.dev.test
+      upstream: http://127.0.0.1:8080
+      path: /api
+      stripPrefix: true
+`)
+
+	cfg, err := ParseService(input)
+	if err != nil {
+		t.Fatalf("ParseService: %v", err)
+	}
+	routes, err := cfg.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("routes = %d, want 2", len(routes))
+	}
+	if routes[1].Path != "/api" || !routes[1].StripPrefix {
+		t.Errorf("routes[1] path=%q strip=%v, want /api/true", routes[1].Path, routes[1].StripPrefix)
+	}
+}
+
 func TestParseService_unknown_field_rejected(t *testing.T) {
 	input := []byte(`
 apiVersion: devedge.infoblox.dev/v1alpha1

@@ -36,6 +36,90 @@ func TestTraefikRoute_HTTP(t *testing.T) {
 	}
 }
 
+func TestTraefikRoute_HTTP_pathPrefix(t *testing.T) {
+	r := types.Route{
+		Host:     "app.dev.test",
+		Upstream: "http://127.0.0.1:8080",
+		Path:     "/api",
+	}
+
+	got := TraefikRoute(r)
+
+	checks := []string{
+		"http:",
+		"app-dev-test-api:",                          // routeName folds in the path
+		"Host(`app.dev.test`) && PathPrefix(`/api`)", // combined rule
+		"priority:",                                  // path route gets an explicit priority
+		`url: "http://127.0.0.1:8080"`,
+	}
+	for _, c := range checks {
+		if !strings.Contains(got, c) {
+			t.Errorf("output missing %q:\n%s", c, got)
+		}
+	}
+	// No StripPrefix → no middleware.
+	if strings.Contains(got, "stripPrefix") || strings.Contains(got, "middlewares") {
+		t.Errorf("non-strip path route should not emit a stripPrefix middleware:\n%s", got)
+	}
+}
+
+func TestTraefikRoute_HTTP_pathPrefix_stripPrefix(t *testing.T) {
+	r := types.Route{
+		Host:        "app.dev.test",
+		Upstream:    "http://127.0.0.1:8080",
+		Path:        "/api",
+		StripPrefix: true,
+	}
+
+	got := TraefikRoute(r)
+
+	checks := []string{
+		"Host(`app.dev.test`) && PathPrefix(`/api`)",
+		"middlewares:",
+		"app-dev-test-api-stripprefix",
+		"stripPrefix:",
+		"prefixes:",
+		`- "/api"`,
+	}
+	for _, c := range checks {
+		if !strings.Contains(got, c) {
+			t.Errorf("output missing %q:\n%s", c, got)
+		}
+	}
+}
+
+func TestTraefikRoute_HTTP_pathLess_unchanged(t *testing.T) {
+	// A path-less route must render exactly as the legacy bare-Host router:
+	// no PathPrefix, no priority, no middleware.
+	r := types.Route{Host: "web.foo.dev.test", Upstream: "http://127.0.0.1:3000"}
+	got := TraefikRoute(r)
+
+	if !strings.Contains(got, "rule: \"Host(`web.foo.dev.test`)\"") {
+		t.Errorf("path-less route should use bare Host rule:\n%s", got)
+	}
+	if strings.Contains(got, "PathPrefix") || strings.Contains(got, "priority:") || strings.Contains(got, "middlewares") {
+		t.Errorf("path-less route should not gain PathPrefix/priority/middlewares:\n%s", got)
+	}
+}
+
+func TestSyncAll_multiPathPerHost(t *testing.T) {
+	dir := t.TempDir()
+	routes := []types.Route{
+		{Host: "app.dev.test", Upstream: "http://127.0.0.1:3000"},               // catch-all
+		{Host: "app.dev.test", Upstream: "http://127.0.0.1:8080", Path: "/api"}, // path route
+	}
+	if err := SyncAll(dir, routes); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	// Two distinct files — no collision on the shared host.
+	if _, err := os.Stat(filepath.Join(dir, "app-dev-test.yaml")); err != nil {
+		t.Error("expected app-dev-test.yaml (catch-all)")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "app-dev-test-api.yaml")); err != nil {
+		t.Error("expected app-dev-test-api.yaml (path route)")
+	}
+}
+
 func TestTraefikRoute_TCP(t *testing.T) {
 	r := types.Route{
 		Host:     "postgres.foo.dev.test",
@@ -135,7 +219,7 @@ func TestWriteRouteFile_and_RemoveRouteFile(t *testing.T) {
 		t.Error("file does not contain expected host")
 	}
 
-	if err := RemoveRouteFile(dir, "web.foo.dev.test"); err != nil {
+	if err := RemoveRouteFile(dir, r); err != nil {
 		t.Fatalf("RemoveRouteFile: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

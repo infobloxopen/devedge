@@ -177,13 +177,15 @@ func (a *API) Handler() http.Handler {
 
 // RegisterRequest is the JSON body for route registration.
 type RegisterRequest struct {
-	Host       string `json:"host"`
-	Upstream   string `json:"upstream"`
-	Protocol   string `json:"protocol,omitempty"`    // "http" (default) or "tcp"
-	BackendTLS bool   `json:"backend_tls,omitempty"` // TLS to upstream
-	Project    string `json:"project,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	TTL        string `json:"ttl,omitempty"`
+	Host        string `json:"host"`
+	Upstream    string `json:"upstream"`
+	Protocol    string `json:"protocol,omitempty"`     // "http" (default) or "tcp"
+	BackendTLS  bool   `json:"backend_tls,omitempty"`  // TLS to upstream
+	Path        string `json:"path,omitempty"`         // URL path prefix; "" = host catch-all
+	StripPrefix bool   `json:"strip_prefix,omitempty"` // trim Path before forwarding
+	Project     string `json:"project,omitempty"`
+	Owner       string `json:"owner,omitempty"`
+	TTL         string `json:"ttl,omitempty"`
 }
 
 func (a *API) listRoutes(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +195,15 @@ func (a *API) listRoutes(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) getRoute(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
-	route, ok := a.reg.Lookup(host)
+	// An optional ?path= narrows the lookup to a specific (host, path) route;
+	// otherwise the host's catch-all (or its "/" match) is returned.
+	var route types.Route
+	var ok bool
+	if p := r.URL.Query().Get("path"); p != "" {
+		route, ok = a.reg.Lookup(host, p)
+	} else {
+		route, ok = a.reg.Lookup(host)
+	}
 	if !ok {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -213,13 +223,15 @@ func (a *API) registerRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	route := types.Route{
-		Host:       req.Host,
-		Upstream:   req.Upstream,
-		Protocol:   types.Protocol(req.Protocol),
-		BackendTLS: req.BackendTLS,
-		Project:    req.Project,
-		Owner:      req.Owner,
-		Source:     "api",
+		Host:        req.Host,
+		Upstream:    req.Upstream,
+		Protocol:    types.Protocol(req.Protocol),
+		BackendTLS:  req.BackendTLS,
+		Path:        req.Path,
+		StripPrefix: req.StripPrefix,
+		Project:     req.Project,
+		Owner:       req.Owner,
+		Source:      "api",
 	}
 
 	if req.TTL != "" {
@@ -243,7 +255,15 @@ func (a *API) registerRoute(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deregisterRoute(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
-	if !a.reg.Deregister(host) {
+	// An optional ?path= removes just that one (host, path) route; without it,
+	// every route registered under the host is removed.
+	var removed bool
+	if p := r.URL.Query().Get("path"); p != "" {
+		removed = a.reg.Deregister(host, p)
+	} else {
+		removed = a.reg.Deregister(host)
+	}
+	if !removed {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

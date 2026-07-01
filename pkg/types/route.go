@@ -27,6 +27,18 @@ type Route struct {
 	// Host is the FQDN being registered (e.g. "api.foo.dev.test").
 	Host string `json:"host"`
 
+	// Path is an optional URL path prefix that further distinguishes routes
+	// sharing a Host. Empty matches any path — the host's catch-all. When set
+	// (e.g. "/api"), the route only matches requests whose path is under the
+	// prefix, selected by longest-prefix match. This lets one host fan out to
+	// several upstreams (e.g. "/" → shell, "/api" → backend).
+	Path string `json:"path,omitempty"`
+
+	// StripPrefix, when true, removes Path from the request path before
+	// forwarding to Upstream — needed when a backend gateway serves "/v1/..."
+	// behind an "/api" prefix. Ignored when Path is empty.
+	StripPrefix bool `json:"strip_prefix,omitempty"`
+
 	// Upstream is the backend address to forward to.
 	// For HTTP: "http://127.0.0.1:3000"
 	// For TCP:  "127.0.0.1:5432" (host:port, no scheme)

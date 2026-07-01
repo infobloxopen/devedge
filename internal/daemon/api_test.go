@@ -67,6 +67,58 @@ func TestRegisterAndGet(t *testing.T) {
 	}
 }
 
+func TestRegister_pathRouting_and_deregister(t *testing.T) {
+	api, reg := testAPI(t)
+
+	// Register a catch-all and a path route on the SAME host.
+	for _, body := range []string{
+		`{"host":"app.dev.test","upstream":"http://127.0.0.1:3000"}`,
+		`{"host":"app.dev.test","upstream":"http://127.0.0.1:8080","path":"/api","strip_prefix":true}`,
+	} {
+		req := httptest.NewRequest("PUT", "/v1/routes", bytes.NewBufferString(body))
+		w := httptest.NewRecorder()
+		api.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("register status = %d, want 201, body: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// GET with ?path= returns the specific route including strip_prefix.
+	req := httptest.NewRequest("GET", "/v1/routes/app.dev.test?path=/api", nil)
+	w := httptest.NewRecorder()
+	api.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200", w.Code)
+	}
+	var route types.Route
+	json.NewDecoder(w.Body).Decode(&route)
+	if route.Path != "/api" || !route.StripPrefix || route.Upstream != "http://127.0.0.1:8080" {
+		t.Errorf("got %+v, want /api strip=true upstream :8080", route)
+	}
+
+	// DELETE with ?path= removes only that route; the catch-all remains.
+	req = httptest.NewRequest("DELETE", "/v1/routes/app.dev.test?path=/api", nil)
+	w = httptest.NewRecorder()
+	api.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204", w.Code)
+	}
+	if _, ok := reg.Lookup("app.dev.test", "/"); !ok {
+		t.Error("catch-all should survive single-path deregister")
+	}
+
+	// DELETE without ?path= removes all remaining routes for the host.
+	req = httptest.NewRequest("DELETE", "/v1/routes/app.dev.test", nil)
+	w = httptest.NewRecorder()
+	api.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete-all status = %d, want 204", w.Code)
+	}
+	if _, ok := reg.Lookup("app.dev.test", "/"); ok {
+		t.Error("host should have no routes after delete-all")
+	}
+}
+
 func TestRegister_conflict(t *testing.T) {
 	api, reg := testAPI(t)
 	reg.Register(types.Route{Host: "x.dev.test", Owner: "alice"})
