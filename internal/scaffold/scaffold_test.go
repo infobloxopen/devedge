@@ -185,10 +185,11 @@ func TestRender_RendersTree(t *testing.T) {
 		t.Fatalf("walking rendered tree: %v", err)
 	}
 
-	// devedge.yaml must exist and contain the service name and hostname.
+	// devedge.yaml must exist, keep the service name, and default the edge host
+	// to the generic app.dev.test (NOT <name>.dev.test).
 	devedgeYAML := filepath.Join(root, "devedge.yaml")
 	checkFileContains(t, devedgeYAML, "name: webhooks")
-	checkFileContains(t, devedgeYAML, "hostname: webhooks.dev.test")
+	checkFileContains(t, devedgeYAML, "hostname: app.dev.test")
 
 	// go.mod must exist and contain the default module path (= Name when Module is "").
 	goMod := filepath.Join(root, "go.mod")
@@ -213,6 +214,47 @@ func TestRender_ModuleOverride(t *testing.T) {
 
 	goMod := filepath.Join(parent, "webhooks", "go.mod")
 	checkFileContains(t, goMod, "module github.com/acme/webhooks")
+}
+
+// TestRender_HostOverride verifies an explicit Host overrides the default
+// app.dev.test edge host in both devedge.yaml (hostname + route host) and the
+// README curl examples, while leaving the service name (resource) untouched.
+// This is the knob the Infoblox-CTO Go tooling flips to csp.dev.test.
+func TestRender_HostOverride(t *testing.T) {
+	parent := t.TempDir()
+
+	p := Params{
+		Name:      "webhooks",
+		ParentDir: parent,
+		GoVersion: "1.25",
+		Host:      "csp.dev.test",
+	}
+	if err := Render(p); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	root := filepath.Join(parent, "webhooks")
+
+	devedgeYAML := filepath.Join(root, "devedge.yaml")
+	checkFileContains(t, devedgeYAML, "hostname: csp.dev.test")
+	checkFileContains(t, devedgeYAML, "host: csp.dev.test")
+	// The service name (used for resource/metadata) is unchanged by --host.
+	checkFileContains(t, devedgeYAML, "name: webhooks")
+
+	// The README curl examples use the overridden host, not the default.
+	readme := filepath.Join(root, "README.md")
+	checkFileContains(t, readme, "https://csp.dev.test/v1/webhook-endpoints")
+	if data, err := os.ReadFile(readme); err == nil && strings.Contains(string(data), "app.dev.test") {
+		t.Errorf("README still references the default host app.dev.test despite --host override")
+	}
+}
+
+// TestDefaultHost pins the public open-core default edge host. If this changes,
+// the CLI docs + the Infoblox-CTO preset expectations change with it.
+func TestDefaultHost(t *testing.T) {
+	if DefaultHost != "app.dev.test" {
+		t.Errorf("DefaultHost = %q, want app.dev.test", DefaultHost)
+	}
 }
 
 // checkFileContains is a test helper that reads path and fails the test if the

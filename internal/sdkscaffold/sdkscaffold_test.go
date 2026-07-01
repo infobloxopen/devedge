@@ -160,11 +160,52 @@ func TestRun_invokesSDKAndEmitsYAML(t *testing.T) {
 	if len(routes) != 1 {
 		t.Fatalf("got %d routes, want 1", len(routes))
 	}
-	if routes[0].Host != "orders.dev.test" {
-		t.Errorf("route host = %q, want orders.dev.test", routes[0].Host)
+	if routes[0].Host != DefaultHost { // generic default (app.dev.test), NOT <name>.dev.test
+		t.Errorf("route host = %q, want %q", routes[0].Host, DefaultHost)
 	}
 	if routes[0].Upstream != "http://127.0.0.1:"+GatewayPort {
 		t.Errorf("route upstream = %q, want http://127.0.0.1:%s", routes[0].Upstream, GatewayPort)
+	}
+}
+
+// TestRun_HostOverride verifies --host overrides the emitted route host without
+// affecting the args forwarded to devedge-sdk (the override is a devedge-native
+// concern). This is the knob the Infoblox-CTO tooling flips to csp.dev.test.
+func TestRun_HostOverride(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "orders")
+
+	fr := &fakeRunner{present: true}
+	opts := Options{Name: "orders", Dir: dir, Host: "csp.dev.test"}
+
+	res, err := Run(context.Background(), fr, opts, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The override does NOT leak into the devedge-sdk args.
+	wantArgs := []string{"new", "service", "orders", "--dir", dir}
+	if !reflect.DeepEqual(fr.gotArgs, wantArgs) {
+		t.Errorf("devedge-sdk args = %v\nwant %v (--host must not be forwarded)", fr.gotArgs, wantArgs)
+	}
+
+	if res.GatewayHost != "csp.dev.test" {
+		t.Errorf("GatewayHost = %q, want csp.dev.test", res.GatewayHost)
+	}
+	data, err := os.ReadFile(res.DevedgeYAML)
+	if err != nil {
+		t.Fatalf("read emitted devedge.yaml: %v", err)
+	}
+	parsed, err := config.ParseResource(data)
+	if err != nil {
+		t.Fatalf("emitted devedge.yaml rejected by parser: %v\n---\n%s", err, data)
+	}
+	routes, err := parsed.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Host != "csp.dev.test" {
+		t.Errorf("route host = %+v, want single route host csp.dev.test", routes)
 	}
 }
 

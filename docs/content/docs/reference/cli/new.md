@@ -51,6 +51,7 @@ Flags:
       --backend string    persistence backend: gorm (default) or ent
       --dir string        target directory (defaults to the service name)
   -h, --help              help for service
+      --host string       dev edge host the emitted devedge.yaml routes to (default "app.dev.test")
       --resource string   singular resource type name (e.g. Order); devedge-sdk defaults it from NAME
 ```
 

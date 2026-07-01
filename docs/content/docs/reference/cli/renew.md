@@ -13,6 +13,7 @@ Usage:
   de renew HOST [flags]
 
 Flags:
-  -h, --help   help for renew
+  -h, --help          help for renew
+      --path string   renew the route registered under this path prefix
 ```
 

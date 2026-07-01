@@ -82,6 +82,7 @@ generated project.
 Flags:
   --dir     parent directory to create the project in (default: current dir)
   --module  Go module path for the generated go.mod (default: service name)
+  --host    dev edge host for devedge.yaml + the curl examples (default: app.dev.test)
 
 Usage:
   de project init NAME [flags]
@@ -89,6 +90,7 @@ Usage:
 Flags:
       --dir string      parent directory to create the project in (default ".")
   -h, --help            help for init
+      --host string     dev edge host for devedge.yaml + the curl examples (default "app.dev.test")
       --module string   Go module path (default: service name)
 ```
 

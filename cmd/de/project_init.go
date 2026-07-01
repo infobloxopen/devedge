@@ -8,7 +8,7 @@ import (
 )
 
 func projectInitCmd() *cobra.Command {
-	var dirFlag, moduleFlag string
+	var dirFlag, moduleFlag, hostFlag string
 
 	cmd := &cobra.Command{
 		Use:   "init NAME",
@@ -35,7 +35,8 @@ generated project.
 
 Flags:
   --dir     parent directory to create the project in (default: current dir)
-  --module  Go module path for the generated go.mod (default: service name)`,
+  --module  Go module path for the generated go.mod (default: service name)
+  --host    dev edge host for devedge.yaml + the curl examples (default: app.dev.test)`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -46,6 +47,7 @@ Flags:
 				Name:      name,
 				Module:    moduleFlag,
 				ParentDir: dirFlag,
+				Host:      hostFlag,
 			}); err != nil {
 				return err
 			}
@@ -60,5 +62,6 @@ Flags:
 	}
 	cmd.Flags().StringVar(&dirFlag, "dir", ".", "parent directory to create the project in")
 	cmd.Flags().StringVar(&moduleFlag, "module", "", "Go module path (default: service name)")
+	cmd.Flags().StringVar(&hostFlag, "host", scaffold.DefaultHost, "dev edge host for devedge.yaml + the curl examples")
 	return cmd
 }

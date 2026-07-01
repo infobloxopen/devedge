@@ -8,6 +8,9 @@ import (
 	"github.com/infobloxopen/devedge/internal/sdkscaffold"
 )
 
+// this file wires `de new service`, a thin driver over the devedge-sdk scaffold
+// that adds the devedge-native route (devedge.yaml).
+
 // newCmd is `de new`, the noun-verb entry point for scaffolding. Today it has
 // one subcommand, `service`; the shape leaves room for more later.
 func newCmd() *cobra.Command {
@@ -26,7 +29,7 @@ func newCmd() *cobra.Command {
 // scaffold succeeds, `de` emits a devedge.yaml routing the service's HTTP/JSON
 // gateway through the local edge — the devedge-native value-add.
 func newServiceCmd() *cobra.Command {
-	var resource, backend, dir string
+	var resource, backend, dir, host string
 
 	cmd := &cobra.Command{
 		Use:   "service NAME [-- DEVEDGE_SDK_FLAGS...]",
@@ -67,6 +70,7 @@ Examples:
 				Resource:    resource,
 				Backend:     backend,
 				Dir:         dir,
+				Host:        host,
 				Passthrough: passthrough,
 			}
 
@@ -90,5 +94,6 @@ Examples:
 	cmd.Flags().StringVar(&resource, "resource", "", "singular resource type name (e.g. Order); devedge-sdk defaults it from NAME")
 	cmd.Flags().StringVar(&backend, "backend", "", "persistence backend: gorm (default) or ent")
 	cmd.Flags().StringVar(&dir, "dir", "", "target directory (defaults to the service name)")
+	cmd.Flags().StringVar(&host, "host", sdkscaffold.DefaultHost, "dev edge host the emitted devedge.yaml routes to")
 	return cmd
 }

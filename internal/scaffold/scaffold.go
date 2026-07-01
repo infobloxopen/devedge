@@ -16,13 +16,20 @@ import (
 //go:embed all:templates
 var templates embed.FS
 
+// DefaultHost is the dev edge host baked into a generated project's
+// devedge.yaml (and the README/AGENTS curl examples) when no Host is passed.
+// It is a single generic dev host, NOT derived from the service name, so the
+// public open core never hardcodes a product-specific host. The override knob
+// is Params.Host (the `de project init --host` flag), which the Infoblox-CTO
+// Go tooling sets to csp.dev.test.
+const DefaultHost = "app.dev.test"
+
 // Params configures one scaffold render.
 type Params struct {
-	// Name is the service name: used as the project dir name, the dev
-	// hostname label (<name>.dev.test), the Helm release slug, and the
-	// default Go module path. Must be a valid lowercase DNS label
-	// (lowercase letters, digits, hyphens; starts with a letter; no
-	// trailing hyphen; max 63 chars).
+	// Name is the service name: used as the project dir name, the Helm
+	// release slug, and the default Go module path. Must be a valid
+	// lowercase DNS label (lowercase letters, digits, hyphens; starts with a
+	// letter; no trailing hyphen; max 63 chars).
 	Name string
 	// Module is the Go module path for the generated project. Empty
 	// defaults to Name.
@@ -32,6 +39,10 @@ type Params struct {
 	ParentDir string
 	// GoVersion is the go directive for the generated go.mod (e.g. "1.25").
 	GoVersion string
+	// Host is the dev edge host written into devedge.yaml (hostname + route
+	// host) and the README/AGENTS curl examples. Empty defaults to
+	// DefaultHost (app.dev.test).
+	Host string
 }
 
 // Versions pins the generated project's dependencies. The defaults are the
@@ -63,6 +74,8 @@ type templateData struct {
 	Name      string
 	Module    string
 	GoVersion string
+	// Host is the dev edge host used in devedge.yaml + the curl examples.
+	Host string
 	// ProtoPkg is Name with hyphens removed — a valid proto package /
 	// Go package-name fragment (DNS labels allow '-', proto packages don't).
 	ProtoPkg string
@@ -103,6 +116,9 @@ func Render(p Params) error {
 	if p.GoVersion == "" {
 		p.GoVersion = "1.25"
 	}
+	if p.Host == "" {
+		p.Host = DefaultHost
+	}
 
 	root := filepath.Join(p.ParentDir, p.Name)
 	preexisting, err := checkTarget(root)
@@ -114,6 +130,7 @@ func Render(p Params) error {
 		Name:      p.Name,
 		Module:    p.Module,
 		GoVersion: p.GoVersion,
+		Host:      p.Host,
 		ProtoPkg:  strings.ReplaceAll(p.Name, "-", ""),
 		Versions:  DefaultVersions,
 	}

@@ -302,6 +302,25 @@ func (s *Shell) HashRoutes() []HashRoute {
 	return hr
 }
 
+// UpsertUFE adds ufe to the shell's roster, or updates the existing entry with
+// the same ID in place. It is idempotent: adding a uFE whose ID is already a
+// member never duplicates it — the existing entry's route + upstream are
+// replaced. It reports whether an existing entry was updated (true) versus a new
+// one appended (false), so callers can tell the user which happened.
+//
+// It mirrors `de compose add`'s member upsert: the config type owns the mutation
+// so the CLI just loads, calls this, and re-marshals.
+func (s *Shell) UpsertUFE(ufe ShellUFE) (updated bool) {
+	for i := range s.Spec.UFEs {
+		if s.Spec.UFEs[i].ID == ufe.ID {
+			s.Spec.UFEs[i] = ufe
+			return true
+		}
+	}
+	s.Spec.UFEs = append(s.Spec.UFEs, ufe)
+	return false
+}
+
 // MarshalShell serializes a Shell back to YAML.
 func MarshalShell(s *Shell) ([]byte, error) {
 	data, err := yaml.Marshal(s)
