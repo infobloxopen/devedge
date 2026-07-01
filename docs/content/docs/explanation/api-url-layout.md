@@ -4,7 +4,7 @@ weight: 30
 ---
 
 The API URL layout is the shape of the paths a service exposes — the arrangement
-of domain, version, and resource in a URL like `/api/ipam/v1/ip-spaces/prod`. It
+of domain, version, and resource in a URL like `/api/catalog/v1/products/sku-42`. It
 gives every devedge service a predictable, readable address so a caller can find
 a resource without reading the service's proto. Read this page when you scaffold
 a service, route one at the edge, or decide how a new API should look.
@@ -23,15 +23,15 @@ The default layout is `product-rest`. It renders:
 /api/{domain}/v{major}/{resource-plural}/{id}
 ```
 
-For example, a service in the `ipam` domain that owns IP spaces exposes:
+For example, a service in the `catalog` domain that owns products exposes:
 
 ```text
-/api/ipam/v1/ip-spaces/prod
+/api/catalog/v1/products/sku-42
 ```
 
 Two properties make this the default. The path reads as plain English, so a
 caller can guess a resource's address from its name. And each domain carries its
-own major version, so `ipam` can move to `v2` without disturbing any other
+own major version, so `catalog` can move to `v2` without disturbing any other
 domain on the same host.
 
 ## The platform and discovery variant
@@ -45,7 +45,7 @@ The `k8s-apis` layout renders the Kubernetes API group/version/resource shape:
 For example:
 
 ```text
-/apis/ipam.infoblox.com/v1/ip-spaces/prod
+/apis/catalog.example.com/v1/products/sku-42
 ```
 
 This layout also expects an `apiVersion` and a `kind` in the request body, the
@@ -67,12 +67,12 @@ convention. The scaffold and the `apilayout` seam validate them.
 
 | Segment | Rule | Example |
 |---------|------|---------|
-| Domain (`product-rest`) | Short product domain, lower-kebab | `ipam`, `dns` |
-| Group (`k8s-apis`) | Fully qualified, dotted API group | `ipam.infoblox.com` |
+| Domain (`product-rest`) | Short product domain, lower-kebab | `catalog`, `billing` |
+| Group (`k8s-apis`) | Fully qualified, dotted API group | `catalog.example.com` |
 | Version | `v` then a major number, optionally a stability suffix | `v1`, `v1beta1`, `v2` |
-| Resource | Plural collection name, lower-kebab | `ip-spaces` |
-| Kind | Singular resource name, PascalCase, in the request body | `IpSpace` |
-| Proto package | The domain's package at its major version | `infoblox.ipam.v1` |
+| Resource | Plural collection name, lower-kebab | `products` |
+| Kind | Singular resource name, PascalCase, in the request body | `Product` |
+| Proto package | The domain's package at its major version | `example.catalog.v1` |
 
 ## The version-before-resource rule
 
@@ -94,8 +94,8 @@ build whose proto `google.api.http` paths use it.
 
 {{< callout type="warning" >}}
 **Put the version segment right after the domain or group, never after a
-collection.** A path like `/api/ipam/ip-spaces/v1/...` is the version-after-resource
-anti-pattern; write `/api/ipam/v1/ip-spaces/...` instead.
+collection.** A path like `/api/catalog/products/v1/...` is the version-after-resource
+anti-pattern; write `/api/catalog/v1/products/...` instead.
 {{< /callout >}}
 
 ## How the layout is set
@@ -127,5 +127,3 @@ serves `/v{version}/{resource}`; the edge makes the public URL product-rest.
   the frontend SDK's how-to for running the shell that fronts the API.
 - [How devedge fits together](how-devedge-fits/) — where the edge, the SDK, and
   the shell each own a responsibility.
-</content>
-</invoke>
