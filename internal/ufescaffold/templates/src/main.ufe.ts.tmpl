@@ -1,0 +1,61 @@
+/**
+ * single-spa entry for the {{ .TitleName }} micro-frontend.
+ *
+ * The host (shell) drives bootstrap → mount → unmount and passes HostProps —
+ * crucially `props.session`, the shell-owned SessionProvider. This uFE NEVER
+ * authenticates; it provides the read-only session into Angular DI via the
+ * open-core SESSION_PROVIDER token (provideDevedgeSession), so components and
+ * the bearer interceptor can read the token. It does NOT reach for any
+ * proprietary RootUi* tokens.
+ */
+import { enableProdMode, NgZone } from '@angular/core';
+import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
+import { Router } from '@angular/router';
+import { singleSpaAngular, getSingleSpaExtraProviders } from 'single-spa-angular';
+import { setPublicPath } from 'systemjs-webpack-interop';
+
+import type { HostProps } from '@infobloxopen/devedge-ufe-core';
+import { SESSION_PROVIDER } from '@infobloxopen/devedge-ufe-angular';
+
+import { AppModule } from './app/app.module';
+import { environment } from './environments/environment';
+
+// Tell webpack where this bundle's chunks live when loaded by the shell.
+setPublicPath('{{ .AppID }}');
+
+if (environment.production) {
+  enableProdMode();
+}
+
+const lifecycles = singleSpaAngular<HostProps>({
+  bootstrapFunction: (props) => {
+    return platformBrowserDynamic([
+      ...getSingleSpaExtraProviders(),
+      // Bridge the shell-owned session into Angular DI at the platform level.
+      // We bind SESSION_PROVIDER directly (a StaticProvider) rather than
+      // provideDevedgeSession(...) because platformBrowserDynamic takes
+      // StaticProviders, whereas provideDevedgeSession returns
+      // EnvironmentProviders (for bootstrapApplication / NgModule providers).
+      // The injected token is identical either way, so the bearer interceptor
+      // in AppModule resolves it and every HTTP call carries the Bearer token.
+      { provide: SESSION_PROVIDER, useValue: props.session },
+    ]).bootstrapModule(AppModule);
+  },
+  template: '<{{ .AppID }}-root />',
+  Router,
+  NgZone,
+  domElementGetter: () => {
+    const id = 'single-spa-application:{{ .AppID }}';
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      document.body.appendChild(el);
+    }
+    return el;
+  },
+});
+
+export const bootstrap = lifecycles.bootstrap;
+export const mount = lifecycles.mount;
+export const unmount = lifecycles.unmount;

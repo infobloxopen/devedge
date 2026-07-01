@@ -1,0 +1,26 @@
+/**
+ * Root Angular module for the {{ .TitleName }} uFE.
+ *
+ * HttpClient is provided WITH the open-core functional bearerAuthInterceptor,
+ * so every API call carries `Authorization: Bearer <token>` from the injected
+ * SessionProvider without any per-app auth wiring.
+ */
+import { NgModule } from '@angular/core';
+import { BrowserModule } from '@angular/platform-browser';
+import {
+  provideHttpClient,
+  withInterceptors,
+} from '@angular/common/http';
+
+import { bearerAuthInterceptor } from '@infobloxopen/devedge-ufe-angular';
+
+import { AppComponent } from './app.component';
+import { AppRoutingModule } from './app-routing.module';
+
+@NgModule({
+  declarations: [AppComponent],
+  imports: [BrowserModule, AppRoutingModule],
+  providers: [provideHttpClient(withInterceptors([bearerAuthInterceptor]))],
+  bootstrap: [AppComponent],
+})
+export class AppModule {}

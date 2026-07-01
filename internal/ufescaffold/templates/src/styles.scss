@@ -1,0 +1,10 @@
+// Global styles for the uFE. Angular Material is the OSS example design system;
+// pull in its Sass API so components render without extra setup.
+@use '@angular/material' as mat;
+
+@include mat.core();
+
+main {
+  font-family: Roboto, 'Helvetica Neue', sans-serif;
+  padding: 1rem;
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.angular/
+*.log
+
+# No lockfile is committed by the scaffold: it would pin a stale, possibly
+# private dependency graph. Generate a fresh one with your package manager
+# (pnpm-lock.yaml / package-lock.json) and commit THAT once install succeeds.
+pnpm-lock.yaml
+package-lock.json

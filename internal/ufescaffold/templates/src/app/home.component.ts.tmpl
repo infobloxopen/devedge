@@ -1,0 +1,11 @@
+/**
+ * The landing view rendered at the app's route ('{{ .AppID }}'). A real,
+ * non-empty component so the matched route shows something on first run.
+ */
+import { Component } from '@angular/core';
+
+@Component({
+  selector: '{{ .AppID }}-home',
+  template: `<section><p>Welcome to the {{ .TitleName }} micro-frontend.</p></section>`,
+})
+export class HomeComponent {}
