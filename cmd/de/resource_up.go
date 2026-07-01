@@ -130,11 +130,15 @@ func runResourceUp(cmd *cobra.Command, res config.Resource, file, envOverride st
 	var reqs []daemon.RegisterRequest
 	for _, r := range routes {
 		req := daemon.RegisterRequest{
-			Host:     r.Host,
-			Upstream: r.Upstream,
-			Project:  r.Project,
-			Owner:    "project-file",
-			TTL:      r.TTL.String(),
+			Host:        r.Host,
+			Upstream:    r.Upstream,
+			Protocol:    string(r.Protocol),
+			BackendTLS:  r.BackendTLS,
+			Path:        r.Path,
+			StripPrefix: r.StripPrefix,
+			Project:     r.Project,
+			Owner:       "project-file",
+			TTL:         r.TTL.String(),
 		}
 		if err := c.Register(context.Background(), req); err != nil {
 			return fmt.Errorf("register %s: %w", r.Host, err)
