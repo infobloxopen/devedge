@@ -14,7 +14,7 @@ BINDIR   := $(DESTDIR)$(PREFIX)
 
 BINS     := de devedged devedge-dns-webhook
 
-.PHONY: all build test lint clean install help docs-cli
+.PHONY: all build test lint lint-api-paths clean install help docs-cli
 .DEFAULT_GOAL := help
 
 ##@ Development
@@ -31,6 +31,9 @@ test: ## Run the test suite
 
 lint: ## Run go vet
 	go vet ./...
+
+lint-api-paths: ## Reject the version-after-resource URL anti-pattern in protos
+	bash hack/lint-api-paths.sh
 
 docs-cli: ## Regenerate the CLI reference pages under docs/ from de --help
 	bash hack/gen-cli-docs.sh
