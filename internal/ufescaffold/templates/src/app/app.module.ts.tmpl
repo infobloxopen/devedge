@@ -16,9 +16,10 @@ import { bearerAuthInterceptor } from '@infobloxopen/devedge-ufe-angular';
 
 import { AppComponent } from './app.component';
 import { AppRoutingModule } from './app-routing.module';
+import { HomeComponent } from './home.component';
 
 @NgModule({
-  declarations: [AppComponent],
+  declarations: [AppComponent, HomeComponent],
   imports: [BrowserModule, AppRoutingModule],
   providers: [provideHttpClient(withInterceptors([bearerAuthInterceptor]))],
   bootstrap: [AppComponent],
