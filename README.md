@@ -331,6 +331,12 @@ de cluster ls
 de cluster watch CLUSTER
 
 de k3d ...          (alias for de cluster)
+
+de new service NAME [-- SDK_FLAGS...]                 Scaffold an apx-native Go service and route it
+de compose init|add|remove|tidy|build|test|up|chart  Compose service modules into one suite binary
+de cell create|down|status|assign|move|rebalance     Manage cell-based deployments and tenant routing
+de api publish                                        Publish a service's OpenAPI v3 spec to the apx catalog
+de ufe new NAME                                       Scaffold an Angular + single-spa micro-frontend
 ```
 
 ## Project config
@@ -636,6 +642,32 @@ actionable error.
 See [`specs/006-storage-migrations-seed/`](specs/006-storage-migrations-seed/) for the full design
 and [`specs/006-storage-migrations-seed/contracts/migrations-contract.md`](specs/006-storage-migrations-seed/contracts/migrations-contract.md)
 for the service-image subcommand contract.
+
+## Full-stack: a service and a micro-frontend
+
+devedge scaffolds and routes both halves of a feature — a Go backend service and
+an Angular micro-frontend — so one developer can build the whole path:
+
+```bash
+de new service orders    # scaffold a Go service (built on devedge-sdk)
+de project up            # provision deps, migrate, route at https://orders.dev.test
+de api publish           # publish the service's OpenAPI v3 to the apx catalog
+de ufe new orders-ufe    # scaffold an Angular micro-frontend (built on devedge-ufe-sdk)
+```
+
+- The Go service is built on
+  [`devedge-sdk`](https://github.com/infobloxopen/devedge-sdk); its documentation
+  lives at <https://infobloxopen.github.io/devedge-sdk/>.
+- The micro-frontend is built on
+  [`devedge-ufe-sdk`](https://github.com/infobloxopen/devedge-ufe-sdk). The shell
+  owns the session, and a bearer interceptor attaches the token to the requests
+  the generated API client makes.
+- For a complete worked example — the backend and the micro-frontend wired end to
+  end — see
+  [`examples/fullstack-oss`](https://github.com/infobloxopen/devedge-ufe-sdk/tree/main/examples/fullstack-oss).
+
+Compose multiple services into one suite binary with `de compose`, and deploy
+across tenant cells with `de cell`.
 
 ## Development
 
