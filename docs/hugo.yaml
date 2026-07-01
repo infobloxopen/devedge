@@ -1,0 +1,54 @@
+baseURL: https://infobloxopen.github.io/devedge/
+languageCode: en-us
+title: devedge
+
+enableGitInfo: true
+
+module:
+  imports:
+    - path: github.com/imfing/hextra
+
+markup:
+  highlight:
+    noClasses: false
+  goldmark:
+    renderer:
+      unsafe: true
+
+params:
+  description: The devedge platform — one CLI to scaffold, route, compose, and deploy a Go service and its Angular micro-frontend.
+  navbar:
+    displayTitle: true
+    displayLogo: false
+  footer:
+    displayCopyright: true
+  theme:
+    default: system
+    displayToggle: true
+  highlight:
+    copy:
+      enable: true
+  editURL:
+    enable: true
+    base: https://github.com/infobloxopen/devedge/edit/main/docs/content
+
+menu:
+  main:
+    - name: Docs
+      pageRef: /docs
+      weight: 1
+    - name: Backend SDK
+      url: https://infobloxopen.github.io/devedge-sdk/
+      weight: 2
+    - name: Frontend SDK
+      url: https://github.com/infobloxopen/devedge-ufe-sdk
+      weight: 3
+    - name: Search
+      weight: 4
+      params:
+        type: search
+    - name: GitHub
+      url: https://github.com/infobloxopen/devedge
+      weight: 5
+      params:
+        icon: github
