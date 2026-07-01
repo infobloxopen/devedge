@@ -29,6 +29,12 @@ const (
 	// defaultShellAPIUpstream is the backend a create-default (method-1) shell
 	// fronts at /api.
 	defaultShellAPIUpstream = "http://127.0.0.1:8080"
+	// defaultShellHost is the host a create-default (from-scratch) shell is
+	// served at when no preset overrides it. It is a single generic dev host
+	// (NOT derived per-uFE) so multiple uFEs share one shell origin. A preset's
+	// shellHost (e.g. the private infoblox-cto preset's csp.dev.test) overrides
+	// it; the public open core never hardcodes a specific product host.
+	defaultShellHost = "app.dev.test"
 )
 
 // ufeCmd is `de ufe`, the noun for micro-frontend scaffolding. It mirrors
@@ -121,8 +127,16 @@ Examples:
 
 			// Roster wiring (WS-018 Phase C): register the uFE into a shell so the
 			// shell picks it up. --shell "" opts out (scaffold only).
+			//
+			// The create-default shell host is app.dev.test unless the applied
+			// preset overrides it via its manifest's shellHost (data, not core
+			// code — e.g. the private infoblox-cto preset sets csp.dev.test).
 			if shellFile != "" {
-				if err := wireUFEIntoShell(out, shellFile, name, route, devPort); err != nil {
+				shellHost := defaultShellHost
+				if h := ufescaffold.PresetShellHost(presetDir); h != "" {
+					shellHost = h
+				}
+				if err := wireUFEIntoShell(out, shellFile, name, route, devPort, shellHost); err != nil {
 					return err
 				}
 			}
@@ -152,7 +166,7 @@ Examples:
 // sensible default shell if the file does not yet exist, then reports the
 // import-map entry the shell will get and the hash route the uFE mounts at. It is
 // idempotent — re-running with the same id updates that entry, never duplicating.
-func wireUFEIntoShell(out io.Writer, shellFile, name, route string, devPort int) error {
+func wireUFEIntoShell(out io.Writer, shellFile, name, route string, devPort int, shellHost string) error {
 	if route == "" {
 		route = name
 	}
@@ -162,7 +176,7 @@ func wireUFEIntoShell(out io.Writer, shellFile, name, route string, devPort int)
 		Upstream: fmt.Sprintf("http://127.0.0.1:%d", devPort),
 	}
 
-	shell, created, err := loadOrInitShell(shellFile, name, ufe)
+	shell, created, err := loadOrInitShell(shellFile, shellHost, ufe)
 	if err != nil {
 		return err
 	}
@@ -198,8 +212,9 @@ func wireUFEIntoShell(out io.Writer, shellFile, name, route string, devPort int)
 
 // loadOrInitShell reads shellFile as a kind: Shell, upserting ufe into it. If the
 // file does not exist it builds a sensible default shell around this one uFE
-// (reporting created=true). Any other read/parse error propagates.
-func loadOrInitShell(shellFile, name string, ufe config.ShellUFE) (shell *config.Shell, created bool, err error) {
+// (reporting created=true), hosted at host. Any other read/parse error
+// propagates.
+func loadOrInitShell(shellFile, host string, ufe config.ShellUFE) (shell *config.Shell, created bool, err error) {
 	data, rerr := os.ReadFile(shellFile)
 	switch {
 	case rerr == nil:
@@ -209,23 +224,25 @@ func loadOrInitShell(shellFile, name string, ufe config.ShellUFE) (shell *config
 		}
 		return shell, false, nil
 	case os.IsNotExist(rerr):
-		return defaultShell(name, ufe), true, nil
+		return defaultShell(host, ufe), true, nil
 	default:
 		return nil, false, fmt.Errorf("read shell config: %w", rerr)
 	}
 }
 
-// defaultShell builds a create-default kind: Shell around a single uFE, deriving
-// the shell host + name from the uFE name (<name>.dev.test / <name>). It uses the
-// standard dev ports: the shell root-config on :4200, a simulated CDN, and a
-// same-origin (method 1) /api fronting the backend on :8080.
-func defaultShell(name string, ufe config.ShellUFE) *config.Shell {
+// defaultShell builds a create-default kind: Shell around a single uFE. The
+// shell is served at host (app.dev.test by default; a preset may override it)
+// and named "app" — a generic shell identity, NOT derived per-uFE, so multiple
+// uFEs registered later share one shell origin. It uses the standard dev ports:
+// the shell root-config on :4200, a simulated CDN, and a same-origin (method 1)
+// /api fronting the backend on :8080.
+func defaultShell(host string, ufe config.ShellUFE) *config.Shell {
 	return &config.Shell{
 		APIVersion: config.APIVersion,
 		Kind:       config.KindShell,
-		Metadata:   config.ObjectMeta{Name: name},
+		Metadata:   config.ObjectMeta{Name: "app"},
 		Spec: config.ShellSpec{
-			Host:          name + ".dev.test",
+			Host:          host,
 			ShellUpstream: defaultShellUpstream,
 			CDN:           config.ShellCDN{Host: defaultShellCDNHost},
 			API: config.ShellAPI{

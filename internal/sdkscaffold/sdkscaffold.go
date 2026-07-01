@@ -45,6 +45,13 @@ const (
 
 	// DevSuffix is devedge's canonical local hostname suffix.
 	DevSuffix = "dev.test"
+
+	// DefaultHost is the dev edge host the emitted devedge.yaml routes to when
+	// no --host is given. It is a single generic dev host (NOT derived from the
+	// service name), so the public open core never hardcodes a product-specific
+	// host. The override knob is Options.Host (the `de new service --host`
+	// flag), which the Infoblox-CTO Go tooling sets to csp.dev.test.
+	DefaultHost = "app." + DevSuffix
 )
 
 // Runner runs an external command. It is injectable so the driver can be tested
@@ -88,6 +95,11 @@ type Options struct {
 	// Dir is the target directory the project is generated into. Defaults to
 	// Name (matching devedge-sdk's own default).
 	Dir string
+	// Host is the dev edge host the emitted devedge.yaml routes to. Empty
+	// defaults to DefaultHost (app.dev.test). This is the override knob the
+	// Infoblox-CTO Go tooling sets to csp.dev.test; it does not affect what is
+	// forwarded to devedge-sdk (only the devedge-native route emitted after).
+	Host string
 	// Passthrough carries extra flags forwarded verbatim to
 	// `devedge-sdk new service` (e.g. --module, --org, --force, --no-generate).
 	Passthrough []string
@@ -119,9 +131,13 @@ func (o Options) SDKArgs() []string {
 	return args
 }
 
-// GatewayHost returns the dev hostname routed to the service's HTTP gateway.
+// GatewayHost returns the dev host routed to the service's HTTP gateway: the
+// --host override when set, else the generic DefaultHost (app.dev.test).
 func (o Options) GatewayHost() string {
-	return o.Name + "." + DevSuffix
+	if o.Host != "" {
+		return o.Host
+	}
+	return DefaultHost
 }
 
 // GatewayUpstream returns the loopback URL the gateway listens on.

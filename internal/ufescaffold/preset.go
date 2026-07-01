@@ -34,6 +34,13 @@ type PresetManifest struct {
 	Name string `json:"name"`
 	// Description is a one-line human summary.
 	Description string `json:"description"`
+	// ShellHost, when non-empty, overrides the create-default shell host (the
+	// public default is app.dev.test). It is DATA, not core code: the public
+	// open core never hardcodes a specific host beyond app.dev.test, and the
+	// private Infoblox-CTO preset sets this to csp.dev.test. It only affects a
+	// shell created from scratch by `de ufe new` — an existing shell.yaml's
+	// host is never rewritten.
+	ShellHost string `json:"shellHost,omitempty"`
 	// Files lists the overlay entries: each maps a source template within the
 	// preset directory to a target path within the generated project.
 	Files []PresetFile `json:"files"`
@@ -151,6 +158,27 @@ func applyPreset(root, name string, data templateData) error {
 		return fs.ReadFile(presets, filepath.ToSlash(filepath.Join(base, rel)))
 	}
 	return overlayPreset(root, m, base, src, data)
+}
+
+// PresetShellHost returns the shellHost declared by the preset directory's
+// preset.json, or "" if presetDir is empty, the manifest is unreadable/invalid,
+// or it declares no shellHost. It is a best-effort read used only to choose the
+// create-default shell host; a genuinely malformed manifest is surfaced later
+// when the overlay is applied (Render → applyPresetDir), so this deliberately
+// swallows read/parse errors rather than failing the host lookup.
+func PresetShellHost(presetDir string) string {
+	if presetDir == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(presetDir, "preset.json"))
+	if err != nil {
+		return ""
+	}
+	var m PresetManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	return m.ShellHost
 }
 
 // applyPresetDir loads <presetDir>/preset.json and applies its overlay onto the

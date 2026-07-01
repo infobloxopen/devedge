@@ -46,7 +46,7 @@ de project up          # provision db, apply migrations, start routing
 make run               # build + run the binary; it listens on :8080
 
 # Example CRUD call (HTTP/JSON via grpc-gateway):
-curl -s -X POST https://{{.Name}}.dev.test/v1/webhook-endpoints \
+curl -s -X POST https://{{.Host}}/v1/webhook-endpoints \
   -H "Content-Type: application/json" \
   -H "Grpc-Metadata-x-dev-subject: dev" \
   -d '{"endpoint": {"url": "https://receiver.example.com/hook", "secret": "s3cr3t", "event_filters": ["push"]}}'

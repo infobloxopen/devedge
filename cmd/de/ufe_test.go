@@ -69,12 +69,12 @@ func TestUFENew_CreatesDefaultShell(t *testing.T) {
 	}
 
 	s := loadShell(t, shellFile)
-	// Derived host + name from the uFE name.
-	if s.Project() != "discovery" {
-		t.Errorf("shell name = %q, want discovery", s.Project())
+	// Generic create-default shell identity + host (NOT derived per-uFE).
+	if s.Project() != "app" {
+		t.Errorf("shell name = %q, want app", s.Project())
 	}
-	if s.Spec.Host != "discovery.dev.test" {
-		t.Errorf("shell host = %q, want discovery.dev.test", s.Spec.Host)
+	if s.Spec.Host != "app.dev.test" {
+		t.Errorf("shell host = %q, want app.dev.test", s.Spec.Host)
 	}
 	if s.Spec.CDN.Host != "cdn.dev.test" {
 		t.Errorf("cdn host = %q, want cdn.dev.test", s.Spec.CDN.Host)
@@ -96,6 +96,49 @@ func TestUFENew_CreatesDefaultShell(t *testing.T) {
 	}
 	if u.Upstream != "http://127.0.0.1:4201" { // --dev-port defaults to 4201
 		t.Errorf("upstream = %q, want http://127.0.0.1:4201 (default dev-port)", u.Upstream)
+	}
+}
+
+// TestUFENew_PresetShellHostOverride verifies a preset directory whose manifest
+// declares shellHost overrides the public app.dev.test create-default shell
+// host (the mechanism the private infoblox-cto preset uses to serve at
+// csp.dev.test). The override is data-driven — the public core never hardcodes
+// the product host.
+func TestUFENew_PresetShellHostOverride(t *testing.T) {
+	// A minimal, valid preset directory: a manifest with shellHost + one overlay
+	// file (a manifest must overlay at least one file).
+	presetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(presetDir, "preset.json"), []byte(`{
+	  "name": "test-cto",
+	  "description": "test preset that overrides the shell host",
+	  "shellHost": "csp.dev.test",
+	  "files": [ { "path": "PRESET.txt", "template": "preset.txt" } ]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(presetDir, "preset.txt"), []byte("applied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	shellFile := filepath.Join(dir, "shell.yaml")
+
+	out, err := runUFE(t, "new", "discovery", "--dir", dir, "--shell", shellFile, "--preset-dir", presetDir)
+	if err != nil {
+		t.Fatalf("ufe new --preset-dir: %v\n%s", err, out)
+	}
+
+	s := loadShell(t, shellFile)
+	if s.Spec.Host != "csp.dev.test" {
+		t.Errorf("shell host = %q, want csp.dev.test (preset shellHost override)", s.Spec.Host)
+	}
+	// The shell identity stays the generic create-default name.
+	if s.Project() != "app" {
+		t.Errorf("shell name = %q, want app", s.Project())
+	}
+	// The preset overlay was actually applied to the scaffolded uFE.
+	if _, err := os.Stat(filepath.Join(dir, "discovery", "PRESET.txt")); err != nil {
+		t.Errorf("preset overlay not applied: %v", err)
 	}
 }
 
