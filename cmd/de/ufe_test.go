@@ -82,6 +82,9 @@ func TestUFENew_CreatesDefaultShell(t *testing.T) {
 	if s.Spec.API.Method != 1 || s.Spec.API.Prefix != "/api" || s.Spec.API.Upstream != "http://127.0.0.1:8080" {
 		t.Errorf("default api = %+v, want method 1 /api -> :8080", s.Spec.API)
 	}
+	if s.Spec.API.Layout != "product-rest" {
+		t.Errorf("default api.layout = %q, want product-rest", s.Spec.API.Layout)
+	}
 
 	// Exactly the one uFE with route/port defaults.
 	if len(s.Spec.UFEs) != 1 {

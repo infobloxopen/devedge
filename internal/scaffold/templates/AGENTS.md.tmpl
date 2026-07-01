@@ -45,8 +45,10 @@ make generate          # regenerate internal/gen from proto sources
 de project up          # provision db, apply migrations, start routing
 make run               # build + run the binary; it listens on :8080
 
-# Example CRUD call (HTTP/JSON via grpc-gateway):
-curl -s -X POST https://{{.Host}}/v1/webhook-endpoints \
+# Example CRUD call (HTTP/JSON via grpc-gateway). The edge routes {{.APIPath}}
+# on {{.Host}} to this service and strips the prefix, so the public URL is
+# {{.Layout}} while the service keeps serving /v1/...:
+curl -s -X POST https://{{.Host}}{{.APIPath}}/v1/webhook-endpoints \
   -H "Content-Type: application/json" \
   -H "Grpc-Metadata-x-dev-subject: dev" \
   -d '{"endpoint": {"url": "https://receiver.example.com/hook", "secret": "s3cr3t", "event_filters": ["push"]}}'

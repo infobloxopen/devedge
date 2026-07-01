@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/infobloxopen/devedge-sdk/apilayout"
 	"github.com/infobloxopen/devedge/pkg/types"
 	"gopkg.in/yaml.v3"
 )
@@ -19,7 +20,9 @@ import (
 // path-prefix routing added in Phase A (types.Route Path/StripPrefix):
 //
 //   - the shell FQDN's catch-all serves the root-config and every non-/api path;
-//   - the same origin's /api prefix (method 1) strips to the backend;
+//   - the same origin's /api prefix (method 1) strips to the backend — either a
+//     single no-domain catch-all or one strip route per product domain at
+//     /api/{domain}, so the public URL is product-rest (WS-019);
 //   - a simulated CDN host serves each uFE's bundle under /<route>/, strip-prefixed.
 //
 // The uFEs themselves are HASH-routed (<host>/#<route>) by single-spa in the
@@ -70,25 +73,47 @@ type ShellCDN struct {
 	Host string `yaml:"host"`
 }
 
-// ShellAPI declares the shell's API topology. Method 1 fronts the backend at a
+// ShellAPI declares the shell's API topology. Method 1 fronts backend(s) at a
 // same-origin path prefix; method 2 fronts each service at its own FQDN.
+//
+// Method 1 supports product-rest per-domain routing: each backend carries a
+// short product domain and is routed at the layout prefix + "/" + domain (e.g.
+// /api/notes) with strip-prefix, so several domains coexist on the shell origin
+// and each composes the product-rest public URL /api/{domain}/v{version}/{res}
+// at the edge WITHOUT the service changing its proto paths (WS-019). The legacy
+// single prefix+upstream (no domain) still works as a no-domain catch-all under
+// the same origin, for backward compatibility.
 type ShellAPI struct {
-	// Method selects the topology: 1 = same-origin /api prefix, 2 = per-service
+	// Method selects the topology: 1 = same-origin path routing, 2 = per-service
 	// FQDNs.
 	Method int `yaml:"method"`
-	// Prefix is the same-origin API path prefix (method 1). Defaults to /api.
+	// Layout names the URL layout strategy for method-1 per-domain routing
+	// (spec.api.services[].domain). Defaults to product-rest; validated via
+	// apilayout.Parse. It selects the prefix (/api for product-rest, /apis for
+	// k8s-apis) each domain/group is routed under.
+	Layout string `yaml:"layout,omitempty"`
+	// Prefix is the same-origin no-domain catch-all API path prefix (method 1).
+	// Defaults to /api. Used only with the legacy single Upstream below.
 	Prefix string `yaml:"prefix,omitempty"`
-	// Upstream is the backend behind the prefix (method 1).
+	// Upstream is the backend behind Prefix (method 1, legacy no-domain
+	// catch-all). Optional when Services declares per-domain backends.
 	Upstream string `yaml:"upstream,omitempty"`
-	// Services are the per-service API FQDNs (method 2).
+	// Services are the per-domain backends (method 1) or the per-service API
+	// FQDNs (method 2).
 	Services []ShellAPIService `yaml:"services,omitempty"`
 }
 
-// ShellAPIService is one per-service API FQDN (method 2).
+// ShellAPIService is one API backend. In method 1 it is a per-domain backend
+// (Domain + Upstream, routed at <layout-prefix>/<domain> with strip-prefix); in
+// method 2 it is a per-service API FQDN (Host + Upstream).
 type ShellAPIService struct {
-	// Host is the service's API FQDN (e.g. "api.notesapp.dev.test").
-	Host string `yaml:"host"`
-	// Upstream is the backend serving that FQDN.
+	// Domain is the short product domain (method 1 product-rest), e.g. "notes".
+	// For k8s-apis it is the fully-qualified API group. The backend is routed at
+	// the layout prefix + "/" + Domain with strip-prefix.
+	Domain string `yaml:"domain,omitempty"`
+	// Host is the service's API FQDN (method 2), e.g. "api.notesapp.dev.test".
+	Host string `yaml:"host,omitempty"`
+	// Upstream is the backend serving this domain (method 1) or FQDN (method 2).
 	Upstream string `yaml:"upstream"`
 }
 
@@ -177,13 +202,37 @@ func (s *Shell) Validate() error {
 		seenRoute[u.Route] = struct{}{}
 	}
 
+	// Resolve + validate the URL layout (product-rest by default). Parse also
+	// normalizes an empty value to the default; store it back so ToRoutes and a
+	// round-trip see the resolved name.
+	layout, err := apilayout.Parse(s.Spec.API.Layout)
+	if err != nil {
+		return fmt.Errorf("shell config: 'spec.api.layout' is invalid: %w", err)
+	}
+	s.Spec.API.Layout = string(layout)
+
 	switch s.Spec.API.Method {
 	case apiMethodSameOrigin:
 		if s.Spec.API.Prefix == "" {
 			s.Spec.API.Prefix = defaultAPIPrefix
 		}
-		if s.Spec.API.Upstream == "" {
-			return fmt.Errorf("shell config: 'spec.api.upstream' is required for api.method 1 (same-origin)")
+		// A method-1 shell must front at least one backend: either the legacy
+		// no-domain catch-all (Upstream) or one or more per-domain backends.
+		if s.Spec.API.Upstream == "" && len(s.Spec.API.Services) == 0 {
+			return fmt.Errorf("shell config: api.method 1 needs either 'spec.api.upstream' (no-domain catch-all) or 'spec.api.services' (per-domain backends)")
+		}
+		seenDomain := make(map[string]struct{}, len(s.Spec.API.Services))
+		for i, svc := range s.Spec.API.Services {
+			if svc.Domain == "" {
+				return fmt.Errorf("shell config: spec.api.services #%d is missing required 'domain' for api.method 1 (per-domain routing)", i+1)
+			}
+			if svc.Upstream == "" {
+				return fmt.Errorf("shell config: spec.api.services %q is missing required 'upstream'", svc.Domain)
+			}
+			if _, dup := seenDomain[svc.Domain]; dup {
+				return fmt.Errorf("shell config: duplicate spec.api.services domain %q", svc.Domain)
+			}
+			seenDomain[svc.Domain] = struct{}{}
 		}
 	case apiMethodPerService:
 		if len(s.Spec.API.Services) == 0 {
@@ -216,8 +265,10 @@ func (s *Shell) Project() string {
 //   - a path-less catch-all on the shell host serves the root-config and every
 //     non-/api path (this is <host>/ and <host>/#<route> — hash routes never
 //     reach the edge);
-//   - method 1 adds a same-origin /api prefix route (strip-prefixed) to the
-//     backend; method 2 adds one per-service host route per declared FQDN;
+//   - method 1 adds same-origin strip routes on the shell host: one per product
+//     domain at <layout-prefix>/{domain} (e.g. /api/notes) so the public URL is
+//     product-rest, plus (if declared) the legacy no-domain catch-all at
+//     spec.api.prefix; method 2 adds one per-service host route per declared FQDN;
 //   - both methods add one CDN route per uFE: /<route> on the CDN host,
 //     strip-prefixed to the uFE's upstream, so cdn/<route>/main.js -> <up>/main.js.
 //
@@ -237,14 +288,35 @@ func (s *Shell) ToRoutes() ([]types.Route, error) {
 	// API routes.
 	switch s.Spec.API.Method {
 	case apiMethodSameOrigin:
-		routes = append(routes, types.Route{
-			Host:        s.Spec.Host,
-			Path:        s.Spec.API.Prefix,
-			StripPrefix: true,
-			Upstream:    s.Spec.API.Upstream,
-			Project:     proj,
-			Source:      "project-file",
-		})
+		// Per-domain product-rest routes: each domain is routed at
+		// <layout-prefix>/{domain} (e.g. /api/notes) on the shell host and
+		// strip-prefixed to its backend. Requesting /api/notes/v1/notes then
+		// strips to /v1/notes at the service — product-rest composed at the edge.
+		layout, err := apilayout.Parse(s.Spec.API.Layout)
+		if err != nil {
+			return nil, fmt.Errorf("shell config: 'spec.api.layout' is invalid: %w", err)
+		}
+		for _, svc := range s.Spec.API.Services {
+			routes = append(routes, types.Route{
+				Host:        s.Spec.Host,
+				Path:        layout.Prefix() + "/" + svc.Domain,
+				StripPrefix: true,
+				Upstream:    svc.Upstream,
+				Project:     proj,
+				Source:      "project-file",
+			})
+		}
+		// Legacy no-domain catch-all at spec.api.prefix (backward compat).
+		if s.Spec.API.Upstream != "" {
+			routes = append(routes, types.Route{
+				Host:        s.Spec.Host,
+				Path:        s.Spec.API.Prefix,
+				StripPrefix: true,
+				Upstream:    s.Spec.API.Upstream,
+				Project:     proj,
+				Source:      "project-file",
+			})
+		}
 	case apiMethodPerService:
 		for _, svc := range s.Spec.API.Services {
 			routes = append(routes, types.Route{

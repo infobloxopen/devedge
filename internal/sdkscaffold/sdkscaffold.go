@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/infobloxopen/devedge-sdk/apilayout"
 	"github.com/infobloxopen/devedge/pkg/config"
 )
 
@@ -100,6 +101,17 @@ type Options struct {
 	// Infoblox-CTO Go tooling sets to csp.dev.test; it does not affect what is
 	// forwarded to devedge-sdk (only the devedge-native route emitted after).
 	Host string
+	// Layout names the URL layout the emitted edge route composes (WS-019).
+	// Empty defaults to apilayout.Default (product-rest); validated via
+	// apilayout.Parse. It is a devedge-native concern — not forwarded to
+	// devedge-sdk (the service keeps its own /v1/... proto paths; the domain is
+	// injected at the edge).
+	Layout string
+	// Domain is the short product domain the service is routed under at the app
+	// host: the edge route is <layout-prefix>/{domain} with strip-prefix, so the
+	// public URL is product-rest and two services on the same host don't collide.
+	// Empty defaults to Name.
+	Domain string
 	// Passthrough carries extra flags forwarded verbatim to
 	// `devedge-sdk new service` (e.g. --module, --org, --force, --no-generate).
 	Passthrough []string
@@ -140,6 +152,34 @@ func (o Options) GatewayHost() string {
 	return DefaultHost
 }
 
+// EdgeLayout resolves the URL layout for the emitted edge route (product-rest by
+// default). It returns an error for an unknown layout name.
+func (o Options) EdgeLayout() (apilayout.Layout, error) {
+	return apilayout.Parse(o.Layout)
+}
+
+// EdgeDomain returns the product domain the service is routed under: the
+// --domain override when set, else the service Name.
+func (o Options) EdgeDomain() string {
+	if o.Domain != "" {
+		return o.Domain
+	}
+	return o.Name
+}
+
+// EdgePath returns the edge route path the service is fronted at:
+// <layout-prefix>/<domain> (e.g. "/api/orders"). The route strips this prefix so
+// the service keeps serving its own /v1/... paths, while the public URL is
+// product-rest. Two services under distinct domains share one host without
+// colliding.
+func (o Options) EdgePath() (string, error) {
+	layout, err := o.EdgeLayout()
+	if err != nil {
+		return "", err
+	}
+	return layout.Prefix() + "/" + o.EdgeDomain(), nil
+}
+
 // GatewayUpstream returns the loopback URL the gateway listens on.
 func GatewayUpstream() string {
 	return "http://127.0.0.1:" + GatewayPort
@@ -150,6 +190,7 @@ type Result struct {
 	Dir         string // project directory
 	DevedgeYAML string // path to the emitted devedge.yaml
 	GatewayHost string // host routed to the service
+	EdgePath    string // edge route path prefix (e.g. "/api/orders"), strip-prefixed
 	Upstream    string // upstream URL the route points at
 }
 
@@ -182,6 +223,13 @@ func Run(ctx context.Context, r Runner, opts Options, stdout, stderr io.Writer) 
 		return Result{}, err
 	}
 
+	// Resolve the edge route path up front so an invalid --api-layout fails
+	// before we scaffold anything.
+	edgePath, err := opts.EdgePath()
+	if err != nil {
+		return Result{}, fmt.Errorf("invalid --api-layout: %w", err)
+	}
+
 	// Drive devedge-sdk to do the heavy scaffolding. Run from the current
 	// working directory; devedge-sdk creates the target dir itself.
 	if err := r.Run(ctx, "", SDKBinary, opts.SDKArgs(), stdout, stderr); err != nil {
@@ -189,10 +237,12 @@ func Run(ctx context.Context, r Runner, opts Options, stdout, stderr io.Writer) 
 	}
 
 	// devedge-native value-add: route the new service's gateway through the
-	// local edge so `de project up` in the scaffolded dir serves it.
+	// local edge so `de project up` in the scaffolded dir serves it. The route
+	// is product-rest path routing (host + <layout-prefix>/<domain>, strip-
+	// prefix) so multiple services coexist on one host without colliding.
 	dir := opts.TargetDir()
 	yamlPath := filepath.Join(dir, "devedge.yaml")
-	if err := WriteDevedgeYAML(yamlPath, opts.Name, opts.GatewayHost(), GatewayUpstream()); err != nil {
+	if err := WriteDevedgeYAML(yamlPath, opts.Name, opts.GatewayHost(), edgePath, GatewayUpstream()); err != nil {
 		return Result{}, fmt.Errorf("emit devedge.yaml: %w", err)
 	}
 
@@ -200,18 +250,19 @@ func Run(ctx context.Context, r Runner, opts Options, stdout, stderr io.Writer) 
 		Dir:         dir,
 		DevedgeYAML: yamlPath,
 		GatewayHost: opts.GatewayHost(),
+		EdgePath:    edgePath,
 		Upstream:    GatewayUpstream(),
 	}, nil
 }
 
 // WriteDevedgeYAML emits a minimal, valid devedge project config that routes
-// host -> upstream for the named project. It does not overwrite an existing
-// file (the scaffold owns a fresh directory, but be safe).
-func WriteDevedgeYAML(path, project, host, upstream string) error {
+// host + edgePath -> upstream (strip-prefix) for the named project. It does not
+// overwrite an existing file (the scaffold owns a fresh directory, but be safe).
+func WriteDevedgeYAML(path, project, host, edgePath, upstream string) error {
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("%s already exists; not overwriting", path)
 	}
-	data := RenderDevedgeYAML(project, host, upstream)
+	data := RenderDevedgeYAML(project, host, edgePath, upstream)
 	// Validate against the REAL loader `de project up` uses (ParseResource
 	// dispatches kind: Config to ParseProject) before writing, so a bad
 	// template can never produce a devedge.yaml that `de project up` rejects.
@@ -229,7 +280,12 @@ func WriteDevedgeYAML(path, project, host, upstream string) error {
 // RenderDevedgeYAML renders the devedge.yaml content. Kept pure (no I/O) so it
 // is trivially testable. The shape matches pkg/config.ProjectConfig (kind:
 // Config + spec.routes) and the product vision's Flow 2 example.
-func RenderDevedgeYAML(project, host, upstream string) string {
+//
+// The route fronts the service at host + edgePath with strip-prefix, so the
+// public URL is product-rest (https://host{edgePath}/v1/...) while the service
+// keeps serving /v1/... — and a second service under a different edgePath shares
+// this host without colliding (WS-019 fix for the WS-018 Go-host catch-all).
+func RenderDevedgeYAML(project, host, edgePath, upstream string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "apiVersion: %s\n", config.APIVersion)
 	fmt.Fprintf(&b, "kind: %s\n", config.Kind)
@@ -241,8 +297,12 @@ func RenderDevedgeYAML(project, host, upstream string) string {
 	b.WriteString("    tls: true\n")
 	b.WriteString("  routes:\n")
 	fmt.Fprintf(&b, "    # HTTP/JSON gateway of the %s service (scaffolded by devedge-sdk;\n", project)
-	fmt.Fprintf(&b, "    # its server listens on :%s). `de project up` serves it over the edge.\n", GatewayPort)
+	fmt.Fprintf(&b, "    # its server listens on :%s). `de project up` serves it over the edge at\n", GatewayPort)
+	fmt.Fprintf(&b, "    # https://%s%s/v1/... — the prefix is stripped so the service still sees\n", host, edgePath)
+	fmt.Fprintf(&b, "    # /v1/..., and a second service under a different path shares this host.\n")
 	fmt.Fprintf(&b, "    - host: %s\n", host)
+	fmt.Fprintf(&b, "      path: %s\n", edgePath)
+	fmt.Fprintf(&b, "      stripPrefix: true\n")
 	fmt.Fprintf(&b, "      upstream: %s\n", upstream)
 	return b.String()
 }

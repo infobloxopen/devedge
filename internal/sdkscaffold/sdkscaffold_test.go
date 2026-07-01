@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/infobloxopen/devedge/pkg/config"
+	"github.com/infobloxopen/devedge/pkg/types"
 )
 
 // fakeRunner records the devedge-sdk invocation and lets a test control whether
@@ -163,8 +164,20 @@ func TestRun_invokesSDKAndEmitsYAML(t *testing.T) {
 	if routes[0].Host != DefaultHost { // generic default (app.dev.test), NOT <name>.dev.test
 		t.Errorf("route host = %q, want %q", routes[0].Host, DefaultHost)
 	}
+	// WS-019: product-rest path routing — /api/{domain}, strip-prefix. Domain
+	// defaults to the service name.
+	if routes[0].Path != "/api/orders" {
+		t.Errorf("route path = %q, want /api/orders", routes[0].Path)
+	}
+	if !routes[0].StripPrefix {
+		t.Error("route must strip the /api/{domain} prefix so the service sees /v1/...")
+	}
 	if routes[0].Upstream != "http://127.0.0.1:"+GatewayPort {
 		t.Errorf("route upstream = %q, want http://127.0.0.1:%s", routes[0].Upstream, GatewayPort)
+	}
+	// res.EdgePath is surfaced for the CLI to print.
+	if res.EdgePath != "/api/orders" {
+		t.Errorf("res.EdgePath = %q, want /api/orders", res.EdgePath)
 	}
 }
 
@@ -248,14 +261,113 @@ func TestWriteDevedgeYAML_refusesOverwrite(t *testing.T) {
 	if err := os.WriteFile(path, []byte("existing"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteDevedgeYAML(path, "orders", "orders.dev.test", GatewayUpstream()); err == nil {
+	if err := WriteDevedgeYAML(path, "orders", "orders.dev.test", "/api/orders", GatewayUpstream()); err == nil {
 		t.Fatal("expected refusal to overwrite an existing devedge.yaml")
 	}
 }
 
 func TestRenderDevedgeYAML_isValid(t *testing.T) {
-	data := RenderDevedgeYAML("notes", "notes.dev.test", GatewayUpstream())
+	data := RenderDevedgeYAML("notes", "notes.dev.test", "/api/notes", GatewayUpstream())
 	if _, err := config.ParseResource([]byte(data)); err != nil {
 		t.Fatalf("rendered devedge.yaml invalid: %v\n---\n%s", err, data)
 	}
+}
+
+// TestRun_TwoServices_NoCollision proves the WS-019 fix: two services scaffolded
+// under the SAME default host get DISTINCT /api/{domain} paths (strip-prefixed),
+// so they coexist on one host instead of colliding on a shared host catch-all.
+func TestRun_TwoServices_NoCollision(t *testing.T) {
+	tmp := t.TempDir()
+
+	fooDir := filepath.Join(tmp, "foo")
+	barDir := filepath.Join(tmp, "bar")
+
+	foo, err := Run(context.Background(), &fakeRunner{present: true}, Options{Name: "foo", Dir: fooDir}, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Run foo: %v", err)
+	}
+	bar, err := Run(context.Background(), &fakeRunner{present: true}, Options{Name: "bar", Dir: barDir}, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Run bar: %v", err)
+	}
+
+	// Same host, distinct paths.
+	if foo.GatewayHost != DefaultHost || bar.GatewayHost != DefaultHost {
+		t.Fatalf("both services should route to %q; got foo=%q bar=%q", DefaultHost, foo.GatewayHost, bar.GatewayHost)
+	}
+	if foo.EdgePath == bar.EdgePath {
+		t.Fatalf("services collide: both routed at %q on host %q", foo.EdgePath, DefaultHost)
+	}
+	if foo.EdgePath != "/api/foo" || bar.EdgePath != "/api/bar" {
+		t.Errorf("edge paths = %q / %q, want /api/foo, /api/bar", foo.EdgePath, bar.EdgePath)
+	}
+
+	// Both routes parse and carry the distinct strip-prefix paths on one host.
+	fooRoutes := routesOf(t, foo.DevedgeYAML)
+	barRoutes := routesOf(t, bar.DevedgeYAML)
+	if len(fooRoutes) != 1 || len(barRoutes) != 1 {
+		t.Fatalf("want one route each; got %d / %d", len(fooRoutes), len(barRoutes))
+	}
+	if fooRoutes[0].Host != barRoutes[0].Host {
+		t.Errorf("services should share the host; got %q vs %q", fooRoutes[0].Host, barRoutes[0].Host)
+	}
+	if fooRoutes[0].Path == barRoutes[0].Path {
+		t.Errorf("services must have distinct paths; both %q", fooRoutes[0].Path)
+	}
+	if !fooRoutes[0].StripPrefix || !barRoutes[0].StripPrefix {
+		t.Error("both routes must strip their /api/{domain} prefix")
+	}
+}
+
+// TestRun_DomainOverride verifies --domain sets the edge path independent of the
+// service name, and --api-layout selects the prefix.
+func TestRun_DomainOverride(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "orders")
+
+	res, err := Run(context.Background(), &fakeRunner{present: true},
+		Options{Name: "orders", Dir: dir, Domain: "commerce"}, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.EdgePath != "/api/commerce" {
+		t.Errorf("EdgePath = %q, want /api/commerce (--domain override)", res.EdgePath)
+	}
+	// --domain must NOT leak into the devedge-sdk args (devedge-native concern).
+	// (SDKArgs is asserted elsewhere; here we only check the emitted route.)
+	routes := routesOf(t, res.DevedgeYAML)
+	if len(routes) != 1 || routes[0].Path != "/api/commerce" {
+		t.Errorf("route = %+v, want single route path /api/commerce", routes)
+	}
+}
+
+// TestRun_InvalidLayout rejects an unknown --api-layout before scaffolding.
+func TestRun_InvalidLayout(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "orders")
+	fr := &fakeRunner{present: true}
+	if _, err := Run(context.Background(), fr, Options{Name: "orders", Dir: dir, Layout: "nope"}, io.Discard, io.Discard); err == nil {
+		t.Fatal("expected error for invalid --api-layout")
+	}
+	if fr.runCalls != 0 {
+		t.Errorf("devedge-sdk must not run when the layout is invalid; got %d calls", fr.runCalls)
+	}
+}
+
+// routesOf reads + parses a devedge.yaml and returns its routes.
+func routesOf(t *testing.T, path string) []types.Route {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %q: %v", path, err)
+	}
+	parsed, err := config.ParseResource(data)
+	if err != nil {
+		t.Fatalf("parse %q: %v", path, err)
+	}
+	routes, err := parsed.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes %q: %v", path, err)
+	}
+	return routes
 }

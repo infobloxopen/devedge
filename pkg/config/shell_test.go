@@ -482,6 +482,186 @@ func TestShell_UpsertUFE(t *testing.T) {
 	}
 }
 
+// --- WS-019: apilayout URL-layout seam (per-domain product-rest routing) ---
+
+const validShellPerDomain = `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Shell
+metadata:
+  name: notesapp
+spec:
+  host: app.dev.test
+  shellUpstream: http://127.0.0.1:4200
+  cdn:
+    host: cdn.dev.test
+  api:
+    method: 1
+    layout: product-rest
+    services:
+      - domain: notes
+        upstream: http://127.0.0.1:8080
+      - domain: tags
+        upstream: http://127.0.0.1:8081
+  ufes:
+    - id: notes-ufe
+      route: notes
+      upstream: http://127.0.0.1:4201
+`
+
+// TestParseShell_LayoutDefault: an omitted spec.api.layout resolves to
+// product-rest during Validate.
+func TestParseShell_LayoutDefault(t *testing.T) {
+	s, err := ParseShell([]byte(validShellMethod1))
+	if err != nil {
+		t.Fatalf("ParseShell: %v", err)
+	}
+	if s.Spec.API.Layout != "product-rest" {
+		t.Errorf("default api.layout = %q, want product-rest", s.Spec.API.Layout)
+	}
+}
+
+// TestParseShell_LayoutInvalid: a bad spec.api.layout is rejected by Validate.
+func TestParseShell_LayoutInvalid(t *testing.T) {
+	input := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Shell
+metadata:
+  name: notesapp
+spec:
+  host: app.dev.test
+  shellUpstream: http://127.0.0.1:4200
+  cdn:
+    host: cdn.dev.test
+  api:
+    method: 1
+    layout: bogus-layout
+    services:
+      - domain: notes
+        upstream: http://127.0.0.1:8080
+  ufes:
+    - id: notes-ufe
+      route: notes
+      upstream: http://127.0.0.1:4201
+`)
+	if _, err := ParseShell(input); err == nil {
+		t.Fatal("expected error for invalid spec.api.layout")
+	}
+}
+
+// TestShell_ToRoutes_PerDomain_ProductREST: method-1 per-domain routing emits one
+// strip route per domain at /api/{domain} on the shell host — the product-rest
+// public shape composed at the edge.
+func TestShell_ToRoutes_PerDomain_ProductREST(t *testing.T) {
+	s, err := ParseShell([]byte(validShellPerDomain))
+	if err != nil {
+		t.Fatalf("ParseShell: %v", err)
+	}
+	routes, err := s.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	// shell catch-all + 2 per-domain /api/{domain} strip routes + 1 cdn route.
+	want := []types.Route{
+		{Host: "app.dev.test", Path: "", StripPrefix: false, Upstream: "http://127.0.0.1:4200", Project: "notesapp", Source: "project-file"},
+		{Host: "app.dev.test", Path: "/api/notes", StripPrefix: true, Upstream: "http://127.0.0.1:8080", Project: "notesapp", Source: "project-file"},
+		{Host: "app.dev.test", Path: "/api/tags", StripPrefix: true, Upstream: "http://127.0.0.1:8081", Project: "notesapp", Source: "project-file"},
+		{Host: "cdn.dev.test", Path: "/notes", StripPrefix: true, Upstream: "http://127.0.0.1:4201", Project: "notesapp", Source: "project-file"},
+	}
+	assertRoutes(t, routes, want)
+}
+
+// TestShell_ToRoutes_PerDomain_K8sAPIs: k8s-apis layout routes each domain
+// (group) under the /apis prefix.
+func TestShell_ToRoutes_PerDomain_K8sAPIs(t *testing.T) {
+	input := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Shell
+metadata:
+  name: platform
+spec:
+  host: app.dev.test
+  shellUpstream: http://127.0.0.1:4200
+  cdn:
+    host: cdn.dev.test
+  api:
+    method: 1
+    layout: k8s-apis
+    services:
+      - domain: ipam.infoblox.com
+        upstream: http://127.0.0.1:8080
+  ufes:
+    - id: ipam-ufe
+      route: ipam
+      upstream: http://127.0.0.1:4201
+`)
+	s, err := ParseShell(input)
+	if err != nil {
+		t.Fatalf("ParseShell: %v", err)
+	}
+	routes, err := s.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	// The API route is under /apis (k8s-apis prefix), not /api.
+	var apiRoute *types.Route
+	for i := range routes {
+		if routes[i].Host == "app.dev.test" && routes[i].StripPrefix {
+			apiRoute = &routes[i]
+			break
+		}
+	}
+	if apiRoute == nil {
+		t.Fatalf("no /apis strip route emitted: %+v", routes)
+	}
+	if apiRoute.Path != "/apis/ipam.infoblox.com" {
+		t.Errorf("k8s-apis route path = %q, want /apis/ipam.infoblox.com", apiRoute.Path)
+	}
+}
+
+// TestShell_ToRoutes_Method1_BackwardCompat: the shipped single prefix+upstream
+// (no domain) method-1 shell still parses and routes at spec.api.prefix.
+func TestShell_ToRoutes_Method1_BackwardCompat(t *testing.T) {
+	s, err := ParseShell([]byte(validShellMethod1))
+	if err != nil {
+		t.Fatalf("ParseShell: %v", err)
+	}
+	routes, err := s.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	// Same as before WS-019: shell catch-all + /api strip route + 2 cdn routes.
+	want := []types.Route{
+		{Host: "notesapp.dev.test", Path: "", StripPrefix: false, Upstream: "http://127.0.0.1:4200", Project: "notesapp", Source: "project-file"},
+		{Host: "notesapp.dev.test", Path: "/api", StripPrefix: true, Upstream: "http://127.0.0.1:8080", Project: "notesapp", Source: "project-file"},
+		{Host: "cdn.dev.test", Path: "/notes", StripPrefix: true, Upstream: "http://127.0.0.1:4201", Project: "notesapp", Source: "project-file"},
+		{Host: "cdn.dev.test", Path: "/tags", StripPrefix: true, Upstream: "http://127.0.0.1:4202", Project: "notesapp", Source: "project-file"},
+	}
+	assertRoutes(t, routes, want)
+}
+
+// TestShell_Method1_PerDomainMissingDomain: a method-1 per-domain backend
+// missing its 'domain' is rejected.
+func TestShell_Method1_PerDomainMissingDomain(t *testing.T) {
+	input := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Shell
+metadata:
+  name: notesapp
+spec:
+  host: app.dev.test
+  shellUpstream: http://127.0.0.1:4200
+  cdn:
+    host: cdn.dev.test
+  api:
+    method: 1
+    services:
+      - upstream: http://127.0.0.1:8080
+  ufes:
+    - id: notes-ufe
+      route: notes
+      upstream: http://127.0.0.1:4201
+`)
+	if _, err := ParseShell(input); err == nil {
+		t.Fatal("expected error for method-1 per-domain backend missing 'domain'")
+	}
+}
+
 func TestMarshalShell_RoundTrip(t *testing.T) {
 	s, err := ParseShell([]byte(validShellMethod1))
 	if err != nil {

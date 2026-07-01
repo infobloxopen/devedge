@@ -30,7 +30,11 @@ make run
 
 ## REST API examples
 
-The gateway is reachable at `https://{{.Host}}`.
+The gateway is reachable at `https://{{.Host}}{{.APIPath}}` — the edge routes
+`{{.APIPath}}` on `{{.Host}}` to this service and strips the prefix, so the
+public URL is {{.Layout}} (`https://{{.Host}}{{.APIPath}}/v1/...`) while the
+service keeps serving `/v1/...`. A second service scaffolded under a different
+`{{.APIPrefix}}/<domain>` shares this host without colliding.
 
 Requests carry an optional subject header `Grpc-Metadata-x-dev-subject`.
 The default subject (`dev`) is granted all permissions. Any other subject
@@ -38,26 +42,26 @@ is denied by the dev authorizer unless you extend the policy.
 
 ```sh
 # Create
-curl -s -X POST https://{{.Host}}/v1/webhook-endpoints \
+curl -s -X POST https://{{.Host}}{{.APIPath}}/v1/webhook-endpoints \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com/hook","secret":"s3cr3t","event_filters":["created","deleted"]}'
 
 # List
-curl -s https://{{.Host}}/v1/webhook-endpoints
+curl -s https://{{.Host}}{{.APIPath}}/v1/webhook-endpoints
 
 # Get
-curl -s https://{{.Host}}/v1/webhook-endpoints/{id}
+curl -s https://{{.Host}}{{.APIPath}}/v1/webhook-endpoints/{id}
 
 # Update
-curl -s -X PUT https://{{.Host}}/v1/webhook-endpoints/{endpoint.id} \
+curl -s -X PUT https://{{.Host}}{{.APIPath}}/v1/webhook-endpoints/{endpoint.id} \
   -H "Content-Type: application/json" \
   -d '{"id":"{id}","url":"https://example.com/hook2","secret":"s3cr3t","event_filters":["created"]}'
 
 # Delete
-curl -s -X DELETE https://{{.Host}}/v1/webhook-endpoints/{id}
+curl -s -X DELETE https://{{.Host}}{{.APIPath}}/v1/webhook-endpoints/{id}
 
 # Use a different subject (will be denied by default)
-curl -s https://{{.Host}}/v1/webhook-endpoints \
+curl -s https://{{.Host}}{{.APIPath}}/v1/webhook-endpoints \
   -H "Grpc-Metadata-x-dev-subject: alice"
 ```
 

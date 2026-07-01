@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/infobloxopen/devedge-sdk/apilayout"
 	"github.com/infobloxopen/devedge/internal/ufescaffold"
 	"github.com/infobloxopen/devedge/pkg/config"
 )
@@ -235,7 +236,8 @@ func loadOrInitShell(shellFile, host string, ufe config.ShellUFE) (shell *config
 // and named "app" — a generic shell identity, NOT derived per-uFE, so multiple
 // uFEs registered later share one shell origin. It uses the standard dev ports:
 // the shell root-config on :4200, a simulated CDN, and a same-origin (method 1)
-// /api fronting the backend on :8080.
+// /api fronting the backend on :8080, with the product-rest URL layout (the
+// default; per-domain backends can be added later under spec.api.services).
 func defaultShell(host string, ufe config.ShellUFE) *config.Shell {
 	return &config.Shell{
 		APIVersion: config.APIVersion,
@@ -247,6 +249,7 @@ func defaultShell(host string, ufe config.ShellUFE) *config.Shell {
 			CDN:           config.ShellCDN{Host: defaultShellCDNHost},
 			API: config.ShellAPI{
 				Method:   1,
+				Layout:   string(apilayout.Default),
 				Prefix:   "/api",
 				Upstream: defaultShellAPIUpstream,
 			},
