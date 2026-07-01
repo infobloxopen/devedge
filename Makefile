@@ -14,7 +14,7 @@ BINDIR   := $(DESTDIR)$(PREFIX)
 
 BINS     := de devedged devedge-dns-webhook
 
-.PHONY: all build test lint clean install help
+.PHONY: all build test lint clean install help docs-cli
 .DEFAULT_GOAL := help
 
 ##@ Development
@@ -31,6 +31,9 @@ test: ## Run the test suite
 
 lint: ## Run go vet
 	go vet ./...
+
+docs-cli: ## Regenerate the CLI reference pages under docs/ from de --help
+	bash hack/gen-cli-docs.sh
 
 ##@ Installation
 
