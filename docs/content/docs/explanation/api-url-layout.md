@@ -123,7 +123,7 @@ serves `/v{version}/{resource}`; the edge makes the public URL product-rest.
 
 - [Ship a full-stack feature](../../tutorial/ship-a-full-stack-feature/) — scaffold,
   route, and run a service and its micro-frontend end to end.
-- [Serve the shell](https://infobloxopen.github.io/devedge-ufe-sdk/docs/how-to/) —
+- [Serve the shell and route micro-frontends](https://infobloxopen.github.io/devedge-ufe-sdk/docs/how-to/serve-the-shell-and-route-microfrontends/) —
   the frontend SDK's how-to for running the shell that fronts the API.
 - [How devedge fits together](how-devedge-fits/) — where the edge, the SDK, and
   the shell each own a responsibility.
