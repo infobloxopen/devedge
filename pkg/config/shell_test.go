@@ -436,6 +436,52 @@ func TestParseResource_Shell_dispatch(t *testing.T) {
 	}
 }
 
+func TestShell_UpsertUFE(t *testing.T) {
+	s, err := ParseShell([]byte(validShellMethod1))
+	if err != nil {
+		t.Fatalf("ParseShell: %v", err)
+	}
+	if len(s.Spec.UFEs) != 2 {
+		t.Fatalf("fixture has %d ufes, want 2", len(s.Spec.UFEs))
+	}
+
+	// Append a brand-new uFE: reports updated=false, roster grows by one.
+	if updated := s.UpsertUFE(ShellUFE{ID: "assets-ufe", Route: "assets", Upstream: "http://127.0.0.1:4203"}); updated {
+		t.Error("UpsertUFE(new) reported updated=true, want false (appended)")
+	}
+	if len(s.Spec.UFEs) != 3 {
+		t.Fatalf("after appending new uFE, roster = %d, want 3", len(s.Spec.UFEs))
+	}
+
+	// Upsert an EXISTING id: reports updated=true, roster does NOT grow, and the
+	// entry's route + upstream are replaced in place (no duplicate).
+	if updated := s.UpsertUFE(ShellUFE{ID: "notes-ufe", Route: "notes-v2", Upstream: "http://127.0.0.1:4210"}); !updated {
+		t.Error("UpsertUFE(existing id) reported updated=false, want true (in-place update)")
+	}
+	if len(s.Spec.UFEs) != 3 {
+		t.Fatalf("after updating existing uFE, roster = %d, want 3 (no duplicate)", len(s.Spec.UFEs))
+	}
+	var found *ShellUFE
+	count := 0
+	for i := range s.Spec.UFEs {
+		if s.Spec.UFEs[i].ID == "notes-ufe" {
+			found = &s.Spec.UFEs[i]
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("notes-ufe appears %d times, want exactly 1", count)
+	}
+	if found.Route != "notes-v2" || found.Upstream != "http://127.0.0.1:4210" {
+		t.Errorf("notes-ufe not updated in place: %+v", *found)
+	}
+
+	// Still a valid shell after the upserts.
+	if err := s.Validate(); err != nil {
+		t.Errorf("shell invalid after upserts: %v", err)
+	}
+}
+
 func TestMarshalShell_RoundTrip(t *testing.T) {
 	s, err := ParseShell([]byte(validShellMethod1))
 	if err != nil {
