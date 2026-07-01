@@ -23,7 +23,7 @@ The default layout is `product-rest`. It renders:
 /api/{domain}/v{major}/{resource-plural}/{id}
 ```
 
-For example, an IP Address Management service that owns IP spaces exposes:
+For example, a service in the `ipam` domain that owns IP spaces exposes:
 
 ```text
 /api/ipam/v1/ip-spaces/prod
