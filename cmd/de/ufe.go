@@ -29,7 +29,7 @@ func ufeCmd() *cobra.Command {
 // first run — the nav group validates, the route matches, and the known
 // template-bootstrap traps are eliminated by construction.
 func ufeNewCmd() *cobra.Command {
-	var dir, preset string
+	var dir, preset, presetDir string
 
 	cmd := &cobra.Command{
 		Use:   "new NAME",
@@ -43,15 +43,18 @@ matches the manifest, the session is provided into Angular DI, and HTTP calls
 carry the Bearer token. It ships no Angular-2-era deadweight and no committed
 lockfile.
 
-Use --preset to apply an overlay on top of the base scaffold. The public CLI
-ships no proprietary preset; the 'infoblox-cto' preset is provided by the
-private Infoblox-CTO/devedge-ufe-sdk-internal repo. An unknown preset fails
-with a clear error.
+Apply an overlay on top of the base scaffold with either:
+  --preset <name>      a built-in preset (the public CLI ships none)
+  --preset-dir <path>  a preset directory holding a canonical preset.json
+The public CLI ships no proprietary preset; the 'infoblox-cto' preset is
+provided by the private Infoblox-CTO/devedge-ufe-sdk-internal repo — apply it
+with --preset-dir <repo>/preset/infoblox-cto. An unknown built-in preset or a
+missing/malformed preset.json fails with a clear error.
 
 Examples:
   de ufe new discovery
   de ufe new widgets --dir ./frontends
-  de ufe new widgets --preset infoblox-cto`,
+  de ufe new widgets --preset-dir ../devedge-ufe-sdk-internal/preset/infoblox-cto`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -60,6 +63,7 @@ Examples:
 				Name:      name,
 				ParentDir: dir,
 				Preset:    preset,
+				PresetDir: presetDir,
 			}
 			if err := ufescaffold.Render(p); err != nil {
 				return err
@@ -77,6 +81,9 @@ Examples:
 			if preset != "" {
 				fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("preset"), colorHost.Sprint(preset))
 			}
+			if presetDir != "" {
+				fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("preset-dir"), colorHost.Sprint(presetDir))
+			}
 			fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Next steps:"))
 			fmt.Fprintf(out, "  cd %s\n", root)
 			fmt.Fprintf(out, "  pnpm install              %s\n", colorLabel.Sprint("# link local SDK packages until published (see README)"))
@@ -86,6 +93,8 @@ Examples:
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "parent directory to create the uFE in (defaults to .)")
-	cmd.Flags().StringVar(&preset, "preset", "", "overlay preset to apply on top of the base (e.g. infoblox-cto, from the private repo)")
+	cmd.Flags().StringVar(&preset, "preset", "", "built-in overlay preset to apply on top of the base (the public CLI ships none)")
+	cmd.Flags().StringVar(&presetDir, "preset-dir", "", "path to a preset directory (with a canonical preset.json) to overlay on top of the base — e.g. the private infoblox-cto preset")
+	cmd.MarkFlagsMutuallyExclusive("preset", "preset-dir")
 	return cmd
 }
