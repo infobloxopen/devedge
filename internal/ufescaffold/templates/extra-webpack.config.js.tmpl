@@ -1,0 +1,43 @@
+/**
+ * Generic single-spa-angular webpack wrapper.
+ *
+ * Emits the micro-frontend as UMD entries the shell loads via SystemJS
+ * (polyfills / main / metadata), and runs a permissive-CORS dev server so the
+ * shell can load this uFE cross-origin during local development.
+ *
+ * There is nothing proprietary here — it is the standard single-spa-angular
+ * custom-webpack shape parameterized by the app name and dev port.
+ */
+const singleSpaAngularWebpack = require('single-spa-angular/lib/webpack').default;
+
+module.exports = (angularWebpackConfig, options) => {
+  const singleSpaConfig = singleSpaAngularWebpack(angularWebpackConfig, options);
+
+  // Three UMD entries: polyfills, the app itself, and its manifest/metadata.
+  singleSpaConfig.entry = {
+    polyfills: './src/polyfills.ts',
+    main: './src/main.ufe.ts',
+    metadata: './src/metadata.ts',
+  };
+
+  singleSpaConfig.output = {
+    ...singleSpaConfig.output,
+    filename: '[name].js',
+    library: '{{ .AppID }}',
+    libraryTarget: 'umd',
+  };
+
+  // Permissive CORS + a fixed dev port so the shell (a different origin) can
+  // load the bundle in local dev. `de ufe new` documents the cert-trust step.
+  singleSpaConfig.devServer = {
+    ...(singleSpaConfig.devServer || {}),
+    port: {{ .DevPort }},
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': '*',
+    },
+    historyApiFallback: true,
+  };
+
+  return singleSpaConfig;
+};

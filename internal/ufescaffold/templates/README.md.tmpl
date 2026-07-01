@@ -1,0 +1,98 @@
+# {{ .TitleName }} — devedge micro-frontend
+
+An Angular 15 + single-spa micro-frontend wired to the open-core
+[`devedge-ufe-sdk`](https://github.com/infobloxopen/devedge-ufe-sdk). Generated
+by `de ufe new {{ .Name }}` — **correct on first run**. There are no
+placeholders to rename: the app id, package name, nav group, and route are all
+already `{{ .AppID }}`.
+
+## What you get, and why it works on the first run
+
+- **Nav renders immediately.** The default nav item in `src/metadata.ts` uses
+  group `{{ .AppID }}`, which is registered in the dev `GroupRegistry`, and
+  `assertNavContributions(...)` runs at import — a wrong group would fail LOUD
+  at startup, never render nothing silently.
+- **The route matches.** The app route (`app-routing.module.ts`), the manifest
+  `routes` (`metadata.ts`), and the nav item `path` all agree on `/{{ .AppID }}`.
+  No accidental `path: ''` that never activates.
+- **Auth is wired.** `main.ufe.ts` provides the shell-owned `SessionProvider`
+  into Angular DI via `provideDevedgeSession(props.session)`; HttpClient is
+  registered with the `bearerAuthInterceptor`, so API calls carry the Bearer
+  token. This uFE never authenticates — the shell owns OIDC.
+- **The webpack/`angular.json` wiring is clean.** A single
+  `@angular-builders/custom-webpack:browser` build using `extra-webpack.config.js`;
+  no dead `single-spa` architect targets pointing at a non-existent
+  `webpack.config`.
+
+## Install
+
+```sh
+# Once the SDK packages are published to npm:
+pnpm install     # (or npm install)
+```
+
+The `@infobloxopen/devedge-ufe-*` packages are referenced by version. **Until
+they are published**, link them from a local checkout of the SDK:
+
+```sh
+# From a clone of infobloxopen/devedge-ufe-sdk (built with `pnpm -r build`):
+pnpm link --global   # in each packages/* dir, OR use file: overrides
+# then, here:
+pnpm link --global @infobloxopen/devedge-ufe-core \
+  @infobloxopen/devedge-ufe-angular \
+  @infobloxopen/devedge-ufe-single-spa \
+  @infobloxopen/devedge-ufe-oidc \
+  @infobloxopen/devedge-ufe-dev-loop
+```
+
+## Local dev loop
+
+```sh
+pnpm start                 # ng serve on https://localhost:{{ .DevPort }}
+pnpm run doctor            # devedge-ufe doctor: loud checklist, not a silent fail
+```
+
+`doctor` runs the open-core `devedge-ufe doctor` against the dev server and
+reports the FIRST failing step (reachability → **TLS cert trust** → CORS →
+manifest → nav groups) with an actionable message.
+
+> **Trust the dev cert.** A self-signed dev cert makes the shell fail to load
+> this uFE **silently**. `doctor` isolates it as its own step. Fix it by
+> trusting the cert (add it to your keychain, or set `NODE_EXTRA_CA_CERTS` to
+> its path), or serve over plain `http` for local dev. This is the single most
+> common silent-failure the dev loop catches.
+
+To point a running shell at this local bundle, use the import-map override:
+
+```ts
+import { override } from '@infobloxopen/devedge-ufe-dev-loop';
+override('{{ .AppID }}', 'https://localhost:{{ .DevPort }}/main.js');
+```
+
+## Build & deploy
+
+```sh
+pnpm build                 # UMD bundle → dist/{{ .AppID }}/
+```
+
+The base scaffold ships a generic static-bundle `Dockerfile`, a minimal
+`deploy/manifest.yaml`, and a `charts/{{ .AppID }}-ufe/` Helm chart. It does
+**not** ship the FeatureFlag-CRD chart — that is provided by the `infoblox-cto`
+preset (`de ufe new {{ .Name }} --preset infoblox-cto`), which lives in the
+private `Infoblox-CTO/devedge-ufe-sdk-internal` repo.
+
+## Layout
+
+```
+package.json            deps (no Angular-2-era deadweight, no committed lockfile)
+angular.json            custom-webpack browser build (no dead single-spa targets)
+extra-webpack.config.js UMD entries + permissive-CORS dev server
+tsconfig*.json          TS config
+src/main.ufe.ts         single-spa entry; provides the session into Angular DI
+src/metadata.ts         validated manifest; default nav group + matching route
+src/polyfills.ts        zone.js + core-js
+src/app/                app.module, app.component, routing, home
+Dockerfile              static-bundle image
+deploy/manifest.yaml    minimal Deployment + Service
+charts/{{ .AppID }}-ufe/ minimal Helm chart
+```

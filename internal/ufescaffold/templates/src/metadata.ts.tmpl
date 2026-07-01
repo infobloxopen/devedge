@@ -1,0 +1,65 @@
+/**
+ * uFE manifest — what the {{ .TitleName }} micro-frontend contributes to the
+ * shell (nav items, routes, exports), validated at import time.
+ *
+ * Correct-by-construction guarantees (the bugs this scaffold eliminates):
+ *   - The default NavContribution's `group` VALIDATES against the active
+ *     GroupRegistry. The dev registry below includes '{{ .AppID }}' (our
+ *     default group), so the item renders on first run — unlike a boilerplate
+ *     nav item whose group matched no registered group and so rendered nothing
+ *     with no error anywhere.
+ *   - The nav item's `path` and the manifest `routes` MATCH the route the app
+ *     actually registers ('/{{ .AppID }}') — not the boilerplate's accidental
+ *     path:'' that never activates.
+ *   - assertNavContributions([...], registry) runs at module load, so a bad
+ *     group fails LOUD at startup instead of rendering nothing at runtime.
+ */
+import {
+  defineManifest,
+  staticGroupRegistry,
+  assertNavContributions,
+  type NavContribution,
+  type GroupRegistry,
+  type UfeManifest,
+} from '@infobloxopen/devedge-ufe-core';
+
+/** The route this uFE registers (kept in one place; app-routing.module reuses it). */
+export const APP_PATH = '/{{ .AppID }}';
+
+/** The nav group this uFE's items belong to. */
+export const APP_GROUP = '{{ .AppID }}';
+
+/**
+ * The dev-time group registry. It includes our default group so the nav item
+ * validates and renders on first run. In production the SHELL supplies the
+ * authoritative registry; this local one keeps the dev loop honest. Bad groups
+ * fail loud (assertNavContributions below), never silently render nothing.
+ */
+const devRegistry: GroupRegistry = staticGroupRegistry([APP_GROUP]);
+
+const navItems: NavContribution[] = [
+  {
+    name: '{{ .TitleName }}',
+    path: APP_PATH,
+    group: APP_GROUP,
+    type: 'menuItem',
+    weight: 100,
+  },
+];
+
+// Fail loud at import time if any nav group is unknown to the dev registry.
+assertNavContributions(navItems, devRegistry);
+
+const manifest: UfeManifest = defineManifest({
+  navItems,
+  routes: [APP_PATH],
+  exports: [
+    {
+      id: '{{ .AppID }}',
+      entry: 'main.js',
+      type: 'ufe-application',
+    },
+  ],
+});
+
+export default manifest;

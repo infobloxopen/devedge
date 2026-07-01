@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ .TitleName }} uFE (standalone)</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <!--
+      Standalone dev harness only. In production this uFE is mounted by the
+      shell into 'single-spa-application:{{ .AppID }}'; there is no index.html
+      in the deployed bundle.
+    -->
+    <{{ .AppID }}-root></{{ .AppID }}-root>
+  </body>
+</html>

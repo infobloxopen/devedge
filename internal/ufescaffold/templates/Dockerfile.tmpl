@@ -1,0 +1,17 @@
+# Generic static-bundle image for the {{ .TitleName }} uFE.
+#
+# Stage 1 builds the UMD bundle; stage 2 serves the static files with a tiny
+# static file server. This is the BASE deploy artifact — it does NOT ship the
+# FeatureFlag-CRD Helm chart (that is the internal preset).
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json ./
+# Install from a registry once the SDK packages are published. For local
+# builds, link the SDK packages first (see README, "Local dev loop").
+RUN npm install --no-audit --no-fund
+COPY . .
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY --from=build /app/dist/{{ .AppID }} /usr/share/nginx/html
+EXPOSE 80

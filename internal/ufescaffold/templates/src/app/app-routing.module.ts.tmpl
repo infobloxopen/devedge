@@ -1,0 +1,23 @@
+/**
+ * Routing for the {{ .TitleName }} uFE.
+ *
+ * The app route is registered at '{{ .AppID }}' — the SAME path published in
+ * metadata.ts (APP_PATH) and reflected in the nav item. This deliberately does
+ * NOT use path:'' (the boilerplate trap that never activates when mounted
+ * under the shell's base href).
+ */
+import { NgModule } from '@angular/core';
+import { RouterModule, type Routes } from '@angular/router';
+
+import { HomeComponent } from './home.component';
+
+const routes: Routes = [
+  { path: '{{ .AppID }}', component: HomeComponent },
+  { path: '', pathMatch: 'full', redirectTo: '{{ .AppID }}' },
+];
+
+@NgModule({
+  imports: [RouterModule.forRoot(routes, { useHash: false })],
+  exports: [RouterModule],
+})
+export class AppRoutingModule {}
