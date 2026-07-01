@@ -32,6 +32,13 @@ annotated proto, generated models + repository + server), then emits a
 devedge.yaml routing the service's HTTP/JSON gateway through the local
 edge so 'de project up' serves it over stable HTTPS.
 
+The route is product-rest path routing: the service is fronted at the app
+host under <layout-prefix>/<domain> (e.g. app.dev.test/api/orders) and the
+prefix is stripped before the request reaches the service. So the public URL
+is product-rest (https://app.dev.test/api/orders/v1/...) while the service
+keeps its own /v1/... proto paths, and two services share one host without
+colliding.
+
 Requires the devedge-sdk binary on PATH:
 
     go install github.com/infobloxopen/devedge-sdk/cmd/devedge-sdk@latest
@@ -48,10 +55,12 @@ Usage:
   de new service NAME [-- DEVEDGE_SDK_FLAGS...] [flags]
 
 Flags:
-      --backend string    persistence backend: gorm (default) or ent
-      --dir string        target directory (defaults to the service name)
-  -h, --help              help for service
-      --host string       dev edge host the emitted devedge.yaml routes to (default "app.dev.test")
-      --resource string   singular resource type name (e.g. Order); devedge-sdk defaults it from NAME
+      --api-layout string   URL layout the edge route composes: product-rest (default) or k8s-apis (default "product-rest")
+      --backend string      persistence backend: gorm (default) or ent
+      --dir string          target directory (defaults to the service name)
+      --domain string       product domain the service is routed under at the app host (default: service name)
+  -h, --help                help for service
+      --host string         dev edge host the emitted devedge.yaml routes to (default "app.dev.test")
+      --resource string     singular resource type name (e.g. Order); devedge-sdk defaults it from NAME
 ```
 

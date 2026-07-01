@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/infobloxopen/devedge-sdk/apilayout"
 	"github.com/infobloxopen/devedge/internal/sdkscaffold"
 )
 
@@ -29,7 +30,7 @@ func newCmd() *cobra.Command {
 // scaffold succeeds, `de` emits a devedge.yaml routing the service's HTTP/JSON
 // gateway through the local edge — the devedge-native value-add.
 func newServiceCmd() *cobra.Command {
-	var resource, backend, dir, host string
+	var resource, backend, dir, host, layout, domain string
 
 	cmd := &cobra.Command{
 		Use:   "service NAME [-- DEVEDGE_SDK_FLAGS...]",
@@ -41,6 +42,13 @@ This is a thin driver over the devedge-sdk scaffold: it forwards to
 annotated proto, generated models + repository + server), then emits a
 devedge.yaml routing the service's HTTP/JSON gateway through the local
 edge so 'de project up' serves it over stable HTTPS.
+
+The route is product-rest path routing: the service is fronted at the app
+host under <layout-prefix>/<domain> (e.g. app.dev.test/api/orders) and the
+prefix is stripped before the request reaches the service. So the public URL
+is product-rest (https://app.dev.test/api/orders/v1/...) while the service
+keeps its own /v1/... proto paths, and two services share one host without
+colliding.
 
 Requires the devedge-sdk binary on PATH:
 
@@ -71,6 +79,8 @@ Examples:
 				Backend:     backend,
 				Dir:         dir,
 				Host:        host,
+				Layout:      layout,
+				Domain:      domain,
 				Passthrough: passthrough,
 			}
 
@@ -81,13 +91,13 @@ Examples:
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "\n%s %s\n", colorSuccess.Sprint("scaffolded"), colorHost.Sprint(name))
-			fmt.Fprintf(out, "%s %s %s %s\n", colorLabel.Sprint("routed"), colorHost.Sprint(res.GatewayHost), colorLabel.Sprint("->"), res.Upstream)
+			fmt.Fprintf(out, "%s %s %s %s\n", colorLabel.Sprint("routed"), colorHost.Sprintf("%s%s", res.GatewayHost, res.EdgePath), colorLabel.Sprint("->"), res.Upstream)
 			fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("wrote"), res.DevedgeYAML)
 			fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Next steps:"))
 			fmt.Fprintf(out, "  cd %s\n", res.Dir)
 			fmt.Fprintf(out, "  make test                 %s\n", colorLabel.Sprint("# build + boot + smoke (devedge-sdk scaffold)"))
 			fmt.Fprintf(out, "  de project up             %s\n", colorLabel.Sprint("# register the route through the edge"))
-			fmt.Fprintf(out, "  %s\n", colorLabel.Sprintf("# then: https://%s/v1/...", res.GatewayHost))
+			fmt.Fprintf(out, "  %s\n", colorLabel.Sprintf("# then: https://%s%s/v1/...", res.GatewayHost, res.EdgePath))
 			return nil
 		},
 	}
@@ -95,5 +105,7 @@ Examples:
 	cmd.Flags().StringVar(&backend, "backend", "", "persistence backend: gorm (default) or ent")
 	cmd.Flags().StringVar(&dir, "dir", "", "target directory (defaults to the service name)")
 	cmd.Flags().StringVar(&host, "host", sdkscaffold.DefaultHost, "dev edge host the emitted devedge.yaml routes to")
+	cmd.Flags().StringVar(&layout, "api-layout", string(apilayout.Default), "URL layout the edge route composes: product-rest (default) or k8s-apis")
+	cmd.Flags().StringVar(&domain, "domain", "", "product domain the service is routed under at the app host (default: service name)")
 	return cmd
 }

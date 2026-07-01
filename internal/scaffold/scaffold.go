@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"text/template"
+
+	"github.com/infobloxopen/devedge-sdk/apilayout"
 )
 
 //go:embed all:templates
@@ -43,6 +45,15 @@ type Params struct {
 	// host) and the README/AGENTS curl examples. Empty defaults to
 	// DefaultHost (app.dev.test).
 	Host string
+	// Layout names the URL layout strategy the emitted route composes at the
+	// edge (WS-019). Empty defaults to apilayout.Default (product-rest);
+	// validated via apilayout.Parse in Render.
+	Layout string
+	// Domain is the short product domain the service is routed under at the app
+	// host: the edge route is <layout-prefix>/{domain} with strip-prefix, so the
+	// public URL is product-rest and two services on the same host don't collide.
+	// Empty defaults to Name.
+	Domain string
 }
 
 // Versions pins the generated project's dependencies. The defaults are the
@@ -79,6 +90,16 @@ type templateData struct {
 	// ProtoPkg is Name with hyphens removed — a valid proto package /
 	// Go package-name fragment (DNS labels allow '-', proto packages don't).
 	ProtoPkg string
+	// Layout is the resolved URL layout name (e.g. "product-rest").
+	Layout string
+	// Domain is the product domain the service is routed under at the edge.
+	Domain string
+	// APIPrefix is the layout's top-level path segment ("/api" for product-rest).
+	APIPrefix string
+	// APIPath is the edge route path the service is fronted at:
+	// APIPrefix + "/" + Domain (e.g. "/api/webhooks"). The route strips this
+	// prefix so the service still sees its own /v1/... paths.
+	APIPath  string
 	Versions Versions
 }
 
@@ -119,6 +140,13 @@ func Render(p Params) error {
 	if p.Host == "" {
 		p.Host = DefaultHost
 	}
+	layout, err := apilayout.Parse(p.Layout)
+	if err != nil {
+		return fmt.Errorf("invalid --api-layout: %w", err)
+	}
+	if p.Domain == "" {
+		p.Domain = p.Name
+	}
 
 	root := filepath.Join(p.ParentDir, p.Name)
 	preexisting, err := checkTarget(root)
@@ -126,12 +154,17 @@ func Render(p Params) error {
 		return err
 	}
 
+	apiPrefix := layout.Prefix()
 	data := templateData{
 		Name:      p.Name,
 		Module:    p.Module,
 		GoVersion: p.GoVersion,
 		Host:      p.Host,
 		ProtoPkg:  strings.ReplaceAll(p.Name, "-", ""),
+		Layout:    string(layout),
+		Domain:    p.Domain,
+		APIPrefix: apiPrefix,
+		APIPath:   apiPrefix + "/" + p.Domain,
 		Versions:  DefaultVersions,
 	}
 

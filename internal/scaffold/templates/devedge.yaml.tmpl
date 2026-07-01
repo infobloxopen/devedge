@@ -15,5 +15,12 @@ spec:
       port: 5432
       migrations: db/migrations
   routes:
+    # Routed at {{.Host}}{{.APIPath}} (strip-prefix) so the public URL is
+    # {{.Layout}}: https://{{.Host}}{{.APIPath}}/v1/... The prefix is stripped
+    # before the request reaches the service, which keeps serving /v1/... — and
+    # a second service under a different /{{.APIPrefix}}/<domain> path shares this
+    # host without colliding.
     - host: {{.Host}}
+      path: {{.APIPath}}
+      stripPrefix: true
       upstream: http://127.0.0.1:8080

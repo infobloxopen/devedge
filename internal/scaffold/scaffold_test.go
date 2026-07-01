@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/infobloxopen/devedge/pkg/config"
+	"github.com/infobloxopen/devedge/pkg/types"
 )
 
 // TestValidateName checks that ValidateName accepts valid DNS labels and
@@ -241,12 +244,113 @@ func TestRender_HostOverride(t *testing.T) {
 	// The service name (used for resource/metadata) is unchanged by --host.
 	checkFileContains(t, devedgeYAML, "name: webhooks")
 
-	// The README curl examples use the overridden host, not the default.
+	// The README curl examples use the overridden host at the product-rest path.
 	readme := filepath.Join(root, "README.md")
-	checkFileContains(t, readme, "https://csp.dev.test/v1/webhook-endpoints")
+	checkFileContains(t, readme, "https://csp.dev.test/api/webhooks/v1/webhook-endpoints")
 	if data, err := os.ReadFile(readme); err == nil && strings.Contains(string(data), "app.dev.test") {
 		t.Errorf("README still references the default host app.dev.test despite --host override")
 	}
+}
+
+// TestRender_ProductRESTRoute pins the WS-019 default: the service is routed at
+// the app host under /api/{domain} (domain defaults to the service name) with
+// strip-prefix, so the public URL is product-rest and the service still serves
+// /v1/...
+func TestRender_ProductRESTRoute(t *testing.T) {
+	parent := t.TempDir()
+	if err := Render(Params{Name: "webhooks", ParentDir: parent, GoVersion: "1.25"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	root := filepath.Join(parent, "webhooks")
+
+	devedgeYAML := filepath.Join(root, "devedge.yaml")
+	checkFileContains(t, devedgeYAML, "host: app.dev.test")
+	checkFileContains(t, devedgeYAML, "path: /api/webhooks")
+	checkFileContains(t, devedgeYAML, "stripPrefix: true")
+
+	// The emitted devedge.yaml must parse + route as a single strip-prefix route.
+	routes := routesOf(t, devedgeYAML)
+	if len(routes) != 1 {
+		t.Fatalf("want 1 route, got %d: %+v", len(routes), routes)
+	}
+	if routes[0].Host != "app.dev.test" || routes[0].Path != "/api/webhooks" || !routes[0].StripPrefix {
+		t.Errorf("route = %+v, want host app.dev.test path /api/webhooks stripPrefix", routes[0])
+	}
+
+	// README curl uses the product-rest public URL.
+	checkFileContains(t, filepath.Join(root, "README.md"), "https://app.dev.test/api/webhooks/v1/webhook-endpoints")
+}
+
+// TestRender_DomainOverride verifies --domain sets the edge path independent of
+// the service name.
+func TestRender_DomainOverride(t *testing.T) {
+	parent := t.TempDir()
+	if err := Render(Params{Name: "webhooks", ParentDir: parent, GoVersion: "1.25", Domain: "hooks"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	routes := routesOf(t, filepath.Join(parent, "webhooks", "devedge.yaml"))
+	if len(routes) != 1 || routes[0].Path != "/api/hooks" {
+		t.Errorf("route = %+v, want single route path /api/hooks (--domain override)", routes)
+	}
+}
+
+// TestRender_InvalidLayout rejects an unknown --api-layout without writing files.
+func TestRender_InvalidLayout(t *testing.T) {
+	parent := t.TempDir()
+	if err := Render(Params{Name: "webhooks", ParentDir: parent, GoVersion: "1.25", Layout: "nope"}); err == nil {
+		t.Fatal("Render with invalid layout: expected error, got nil")
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("invalid layout created %d entries under ParentDir, want 0", len(entries))
+	}
+}
+
+// TestRender_TwoServices_NoCollision proves two services scaffolded under the
+// same default host get distinct /api/{domain} paths — they coexist on one host.
+func TestRender_TwoServices_NoCollision(t *testing.T) {
+	parent := t.TempDir()
+	if err := Render(Params{Name: "foo", ParentDir: parent, GoVersion: "1.25"}); err != nil {
+		t.Fatalf("Render foo: %v", err)
+	}
+	if err := Render(Params{Name: "bar", ParentDir: parent, GoVersion: "1.25"}); err != nil {
+		t.Fatalf("Render bar: %v", err)
+	}
+	foo := routesOf(t, filepath.Join(parent, "foo", "devedge.yaml"))
+	bar := routesOf(t, filepath.Join(parent, "bar", "devedge.yaml"))
+	if len(foo) != 1 || len(bar) != 1 {
+		t.Fatalf("want one route each, got %d / %d", len(foo), len(bar))
+	}
+	if foo[0].Host != bar[0].Host {
+		t.Errorf("services should share the host; got %q vs %q", foo[0].Host, bar[0].Host)
+	}
+	if foo[0].Path == bar[0].Path {
+		t.Errorf("services collide: both routed at %q on host %q", foo[0].Path, foo[0].Host)
+	}
+	if foo[0].Path != "/api/foo" || bar[0].Path != "/api/bar" {
+		t.Errorf("paths = %q / %q, want /api/foo, /api/bar", foo[0].Path, bar[0].Path)
+	}
+}
+
+// routesOf reads + parses a scaffolded devedge.yaml and returns its routes.
+func routesOf(t *testing.T, path string) []types.Route {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %q: %v", path, err)
+	}
+	parsed, err := config.ParseResource(data)
+	if err != nil {
+		t.Fatalf("parse %q: %v", path, err)
+	}
+	routes, err := parsed.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes %q: %v", path, err)
+	}
+	return routes
 }
 
 // TestDefaultHost pins the public open-core default edge host. If this changes,

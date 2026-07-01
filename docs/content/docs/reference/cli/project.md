@@ -79,19 +79,28 @@ After scaffolding, the project is immediately usable:
 For a full walk-through of the generated layout see AGENTS.md inside the
 generated project.
 
+The service is routed at the app host under a product-rest path prefix
+(<layout-prefix>/<domain>, e.g. app.dev.test/api/NAME) and strip-prefixed, so
+the public URL is product-rest and two scaffolded services share one host
+without colliding.
+
 Flags:
-  --dir     parent directory to create the project in (default: current dir)
-  --module  Go module path for the generated go.mod (default: service name)
-  --host    dev edge host for devedge.yaml + the curl examples (default: app.dev.test)
+  --dir         parent directory to create the project in (default: current dir)
+  --module      Go module path for the generated go.mod (default: service name)
+  --host        dev edge host for devedge.yaml + the curl examples (default: app.dev.test)
+  --api-layout  URL layout the edge route composes: product-rest (default) or k8s-apis
+  --domain      product domain the service is routed under at the app host (default: service name)
 
 Usage:
   de project init NAME [flags]
 
 Flags:
-      --dir string      parent directory to create the project in (default ".")
-  -h, --help            help for init
-      --host string     dev edge host for devedge.yaml + the curl examples (default "app.dev.test")
-      --module string   Go module path (default: service name)
+      --api-layout string   URL layout the edge route composes: product-rest (default) or k8s-apis (default "product-rest")
+      --dir string          parent directory to create the project in (default ".")
+      --domain string       product domain the service is routed under at the app host (default: service name)
+  -h, --help                help for init
+      --host string         dev edge host for devedge.yaml + the curl examples (default "app.dev.test")
+      --module string       Go module path (default: service name)
 ```
 
 ### `de project up`

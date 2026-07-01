@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 
+	"github.com/infobloxopen/devedge-sdk/apilayout"
 	"github.com/infobloxopen/devedge/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
 func projectInitCmd() *cobra.Command {
-	var dirFlag, moduleFlag, hostFlag string
+	var dirFlag, moduleFlag, hostFlag, layoutFlag, domainFlag string
 
 	cmd := &cobra.Command{
 		Use:   "init NAME",
@@ -33,10 +34,17 @@ After scaffolding, the project is immediately usable:
 For a full walk-through of the generated layout see AGENTS.md inside the
 generated project.
 
+The service is routed at the app host under a product-rest path prefix
+(<layout-prefix>/<domain>, e.g. app.dev.test/api/NAME) and strip-prefixed, so
+the public URL is product-rest and two scaffolded services share one host
+without colliding.
+
 Flags:
-  --dir     parent directory to create the project in (default: current dir)
-  --module  Go module path for the generated go.mod (default: service name)
-  --host    dev edge host for devedge.yaml + the curl examples (default: app.dev.test)`,
+  --dir         parent directory to create the project in (default: current dir)
+  --module      Go module path for the generated go.mod (default: service name)
+  --host        dev edge host for devedge.yaml + the curl examples (default: app.dev.test)
+  --api-layout  URL layout the edge route composes: product-rest (default) or k8s-apis
+  --domain      product domain the service is routed under at the app host (default: service name)`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -48,6 +56,8 @@ Flags:
 				Module:    moduleFlag,
 				ParentDir: dirFlag,
 				Host:      hostFlag,
+				Layout:    layoutFlag,
+				Domain:    domainFlag,
 			}); err != nil {
 				return err
 			}
@@ -63,5 +73,7 @@ Flags:
 	cmd.Flags().StringVar(&dirFlag, "dir", ".", "parent directory to create the project in")
 	cmd.Flags().StringVar(&moduleFlag, "module", "", "Go module path (default: service name)")
 	cmd.Flags().StringVar(&hostFlag, "host", scaffold.DefaultHost, "dev edge host for devedge.yaml + the curl examples")
+	cmd.Flags().StringVar(&layoutFlag, "api-layout", string(apilayout.Default), "URL layout the edge route composes: product-rest (default) or k8s-apis")
+	cmd.Flags().StringVar(&domainFlag, "domain", "", "product domain the service is routed under at the app host (default: service name)")
 	return cmd
 }
