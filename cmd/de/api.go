@@ -21,7 +21,7 @@ func apiCmd() *cobra.Command {
 
 // apiPublishCmd is `de api publish` — a thin wrapper that:
 //
-//  1. (Re)generates the OpenAPI v3 spec via `make generate` in the service dir.
+//  1. (Re)generates the OpenAPI v3 spec via `de generate` in the service dir.
 //  2. Arranges the flat `openapi/<svc>.openapi.yaml` into the apx layout
 //     `openapi/<domain>/<svc>/<line>/<svc>.openapi.yaml`.
 //  3. Shells out to `apx release prepare` with the right arguments, then (if
@@ -52,7 +52,7 @@ func apiPublishCmd() *cobra.Command {
 		Long: `Publish a service's public API as an OpenAPI v3 spec to the apx catalog.
 
 Steps performed:
-  1. Run 'make generate' in the service directory to produce a fresh
+  1. Run 'de generate' in the service directory to produce a fresh
      openapi/<svc>.openapi.yaml (skip with --skip-generate).
   2. Arrange the spec into the apx directory layout:
        openapi/<domain>/<svc>/<line>/<svc>.openapi.yaml
@@ -135,11 +135,13 @@ Examples:
 				return err
 			}
 
-			// 1. (Re)generate the spec.
+			// 1. (Re)generate the spec via the hermetic `de generate` logic
+			// (pinned buf + plugins) — the same build authority `de generate`
+			// exposes, no longer a `make generate` shell-out (WS-023).
 			if !skipGenerate {
-				fmt.Fprintf(cmd.OutOrStdout(), "generating spec: make generate in %s\n", dir)
-				if err := runMake(cmd, dir, "generate"); err != nil {
-					return fmt.Errorf("make generate: %w\n\nHint: skip with --skip-generate if the spec is already current", err)
+				fmt.Fprintf(cmd.OutOrStdout(), "generating spec: de generate in %s\n", dir)
+				if err := runGenerate(cmd, dir); err != nil {
+					return fmt.Errorf("de generate: %w\n\nHint: skip with --skip-generate if the spec is already current", err)
 				}
 			}
 
@@ -201,7 +203,7 @@ Examples:
 	cmd.Flags().StringVar(&canonicalRepo, "canonical-repo", "", "Canonical APIs repo, e.g. github.com/infobloxopen/apis (required)")
 	cmd.Flags().StringVar(&serviceDir, "service-dir", "", "Service root directory (default: current working directory)")
 	cmd.Flags().BoolVar(&submit, "submit", false, "Also run 'apx release submit' after prepare (opens PR)")
-	cmd.Flags().BoolVar(&skipGenerate, "skip-generate", false, "Skip 'make generate'; use the existing openapi/<svc>.openapi.yaml")
+	cmd.Flags().BoolVar(&skipGenerate, "skip-generate", false, "Skip 'de generate'; use the existing openapi/<svc>.openapi.yaml")
 	cmd.Flags().BoolVar(&client, "client", false, "After publishing the spec, also generate a typed TS/Angular client via 'apx client generate'")
 	cmd.Flags().StringVar(&clientOut, "client-out", "", "Output directory for the generated client (default: clients/<svc>-client under the service dir)")
 	cmd.Flags().StringVar(&clientScope, "client-scope", "", "npm scope for the generated client package, e.g. @acme (optional)")
@@ -274,7 +276,7 @@ func indexOf(s, sep string) int {
 // artifact; the arranged copy is what apx consumes.
 func arrangeSpec(srcSpec, destDir, destSpec string) error {
 	if _, err := os.Stat(srcSpec); os.IsNotExist(err) {
-		return fmt.Errorf("spec not found at %s — run 'make generate' first (or omit --skip-generate)", srcSpec)
+		return fmt.Errorf("spec not found at %s — run 'de generate' first (or omit --skip-generate)", srcSpec)
 	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("create apx layout dir %s: %w", destDir, err)
@@ -346,12 +348,6 @@ func runClientStep(cmd *cobra.Command, dir, srcSpec, svc, version, clientOut, sc
 			filepath.Join(dir, out))
 	}
 	return nil
-}
-
-// runMake shells out to `make <target>` in dir, streaming stdout/stderr to the
-// command's output writers.
-func runMake(cmd *cobra.Command, dir, target string) error {
-	return runExec(cmd, dir, "make", target)
 }
 
 // runExec runs name with args in dir, streaming to cmd's out/err writers.

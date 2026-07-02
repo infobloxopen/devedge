@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/infobloxopen/devedge/internal/certs"
 	"github.com/infobloxopen/devedge/internal/dns"
+	"github.com/infobloxopen/devedge/internal/makefrag"
 	"github.com/infobloxopen/devedge/internal/platform"
 )
 
@@ -108,6 +110,17 @@ func doctorCmd() *cobra.Command {
 				}
 				fmt.Printf("  [%s] %-20s %s\n", icon, r.Name, r.Message)
 			}
+			// WS-023: in a service project, flag a managed Makefile fragment that
+			// has gone stale or been hand-edited. Only reported when a fragment
+			// exists in the current directory (a no-op elsewhere).
+			if name, msg, ok, present := checkMakeFragment(); present {
+				icon := colorSuccess.Sprint("PASS")
+				if !ok {
+					icon = colorError.Sprint("FAIL")
+					allPassed = false
+				}
+				fmt.Printf("  [%s] %-20s %s\n", icon, name, msg)
+			}
 			if allPassed {
 				fmt.Printf("\n%s\n", colorSuccess.Sprint("All checks passed."))
 			} else {
@@ -115,4 +128,24 @@ func doctorCmd() *cobra.Command {
 			}
 		},
 	}
+}
+
+// checkMakeFragment inspects .devedge/make/devedge.mk in the current directory.
+// present is false when there is no managed fragment (so doctor stays silent
+// outside a synced service project). When present, ok reports whether it matches
+// what `de sync` would write; a mismatch means stale or hand-edited.
+func checkMakeFragment() (name, msg string, ok, present bool) {
+	name = "make fragment"
+	wd, err := os.Getwd()
+	if err != nil {
+		return name, "", false, false
+	}
+	b, err := os.ReadFile(makefrag.Path(wd))
+	if err != nil || !makefrag.IsManaged(b) {
+		return name, "", false, false
+	}
+	if makefrag.IsCurrent(b) {
+		return name, makefrag.RelPath + " is up to date", true, true
+	}
+	return name, makefrag.RelPath + " is stale or hand-edited — run 'de sync' to regenerate", false, true
 }

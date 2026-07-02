@@ -69,6 +69,19 @@ func rootCmd() *cobra.Command {
 		apiCmd(),
 	)
 
+	// WS-023: `de` as the hermetic build authority. These build verbs operate on
+	// a service project dir and run the pinned toolchain (internal/toolchain);
+	// `de sync` writes the managed Makefile shim. Kept in a separate AddCommand
+	// block to minimize reconciliation with the concurrent `de migrate` work.
+	root.AddCommand(
+		generateCmd(),
+		buildCmd(),
+		testCmd(),
+		lintCmd(),
+		imageCmd(),
+		syncCmd(),
+	)
+
 	applyColoredHelp(root)
 	return root
 }
