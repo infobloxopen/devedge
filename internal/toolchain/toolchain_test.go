@@ -3,6 +3,8 @@ package toolchain
 import (
 	"strings"
 	"testing"
+
+	"github.com/infobloxopen/devedge/internal/scaffold"
 )
 
 func TestRef(t *testing.T) {
@@ -49,5 +51,26 @@ func TestBufPluginsComplete(t *testing.T) {
 		if !seen {
 			t.Errorf("missing pinned plugin %q", bin)
 		}
+	}
+}
+
+// TestCodegenPluginsMatchScaffoldRuntime enforces the WS-023 lock-step invariant
+// documented on this package: the codegen plugin versions `de` runs must equal
+// the runtime module versions the scaffold bakes into a generated service's
+// go.mod, so generated code always matches the modules it compiles against. A
+// plugin and its runtime library share one release line:
+//   - protoc-gen-go        <-> google.golang.org/protobuf   (Protobuf)
+//   - protoc-gen-grpc-gateway <-> grpc-gateway/v2            (Gateway)
+//
+// (protoc-gen-go-grpc and google.golang.org/grpc are DIFFERENT modules on
+// independent version lines, so they are intentionally not paired here.)
+func TestCodegenPluginsMatchScaffoldRuntime(t *testing.T) {
+	if ProtocGenGoVersion != scaffold.DefaultVersions.Protobuf {
+		t.Errorf("protoc-gen-go %s must match scaffold Protobuf runtime %s (lock-step drift)",
+			ProtocGenGoVersion, scaffold.DefaultVersions.Protobuf)
+	}
+	if ProtocGenGRPCGatewayVersion != scaffold.DefaultVersions.Gateway {
+		t.Errorf("protoc-gen-grpc-gateway %s must match scaffold Gateway runtime %s (lock-step drift)",
+			ProtocGenGRPCGatewayVersion, scaffold.DefaultVersions.Gateway)
 	}
 }

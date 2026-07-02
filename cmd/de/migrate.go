@@ -137,7 +137,13 @@ func runMigrateNew(cmd *cobra.Command, o *migrateOpts, rawName string) error {
 		return fmt.Errorf("create migrations dir %s: %w", dir, err)
 	}
 
-	next, err := nextVersion(dir)
+	// An SDK service reserves 0001 for the framework baseline, so its first
+	// domain migration is 0002; a raw service starts at 0001.
+	firstExpected := uint(1)
+	if migrate.FrameworkBaselinePresent(dir) {
+		firstExpected = 2
+	}
+	next, err := nextVersion(dir, firstExpected)
 	if err != nil {
 		return err
 	}
@@ -193,8 +199,10 @@ func migrationHeader(self, inverse, dir string) string {
 `, self, inverse, verb)
 }
 
-// nextVersion returns maxVersion(dir)+1, treating a missing/empty dir as 0.
-func nextVersion(dir string) (uint, error) {
+// nextVersion returns the next migration version to scaffold: max(on-disk)+1, or
+// firstExpected for an empty/missing dir (1 for a raw service, 2 for an SDK
+// service whose 0001 is the reserved framework baseline).
+func nextVersion(dir string, firstExpected uint) (uint, error) {
 	matches, err := filepath.Glob(filepath.Join(dir, "*.up.sql"))
 	if err != nil {
 		return 0, fmt.Errorf("scan migrations %s: %w", dir, err)
@@ -204,6 +212,9 @@ func nextVersion(dir string) (uint, error) {
 		if v, ok := parseMigrationVersion(filepath.Base(f)); ok && v > max {
 			max = v
 		}
+	}
+	if max == 0 {
+		return firstExpected, nil
 	}
 	return max + 1, nil
 }
@@ -242,7 +253,14 @@ func runMigrateLint(cmd *cobra.Command, o *migrateOpts) error {
 		return err
 	}
 
-	problems, warnings := lintSequence(dir)
+	// An SDK service reserves 0001 for the framework baseline (composed by the
+	// applier), so its first on-disk (domain) migration must be 0002; a raw
+	// service owns 0001 itself.
+	firstExpected := uint(1)
+	if migrate.FrameworkBaselinePresent(dir) {
+		firstExpected = 2
+	}
+	problems, warnings := lintSequence(dir, firstExpected)
 	for _, w := range warnings {
 		fmt.Fprintf(out, "%s %s\n", colorWarning.Sprint("warning:"), w)
 	}
@@ -281,8 +299,10 @@ func parseMigrationVersion(base string) (uint, bool) {
 }
 
 // lintSequence runs the authoritative pure-Go checks over dir and returns the
-// (fatal) problems and (non-fatal) warnings it found.
-func lintSequence(dir string) (problems, warnings []string) {
+// (fatal) problems and (non-fatal) warnings it found. firstExpected is the
+// version the first on-disk migration must carry: 1 for a raw service, 2 for an
+// SDK service (whose 0001 is the reserved framework baseline).
+func lintSequence(dir string, firstExpected uint) (problems, warnings []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return []string{fmt.Sprintf("read migrations dir %s: %v", dir, err)}, nil
@@ -346,17 +366,27 @@ func lintSequence(dir string) (problems, warnings []string) {
 		}
 	}
 
-	// Contiguity: sorted up versions must be 1,2,3,... with no gaps.
+	// Contiguity: sorted up versions must be firstExpected, +1, +2, ... with no
+	// gaps. All arithmetic below uses only addition/comparison on the ascending,
+	// de-duplicated slice (each version keys a map, so versions strictly
+	// increase) — never an unsigned subtraction that could underflow on a
+	// version 0 or an out-of-range first version.
 	versions := make([]uint, 0, len(ups))
 	for v := range ups {
 		versions = append(versions, v)
 	}
 	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
 	if len(versions) > 0 {
-		if versions[0] != 1 {
-			problems = append(problems, fmt.Sprintf("first migration must be 0001, found %04d", versions[0]))
+		if versions[0] != firstExpected {
+			if firstExpected == 2 {
+				problems = append(problems, fmt.Sprintf("first migration must be 0002 (0001 is reserved for the SDK framework baseline), found %04d", versions[0]))
+			} else {
+				problems = append(problems, fmt.Sprintf("first migration must be %04d, found %04d", firstExpected, versions[0]))
+			}
 		}
 		for i := 1; i < len(versions); i++ {
+			// versions[i] > versions[i-1] (sorted + unique), so versions[i-1]+1
+			// never overflows past versions[i]; the "missing" is the next number.
 			if versions[i] != versions[i-1]+1 {
 				problems = append(problems, fmt.Sprintf("gap in migration sequence: %04d follows %04d (missing %04d)", versions[i], versions[i-1], versions[i-1]+1))
 			}
@@ -470,10 +500,23 @@ func runMigrateUp(cmd *cobra.Command, o *migrateOpts) error {
 		return fmt.Errorf("prepare down-store %s: %w", store.Dir, err)
 	}
 
+	// Compose the SDK framework baseline (0001) ahead of the on-disk module
+	// migrations (0002+) when this service depends on the SDK migration engine,
+	// so `de migrate up` applies the SAME version space the service applies at
+	// Serve (1=framework, 2+=domain). A raw/non-SDK dep composes nothing.
+	src, cleanup, composed, err := migrate.ComposeSource(dir)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("migrations:"), dir)
+	if composed {
+		fmt.Fprintf(out, "%s composing SDK framework baseline (0001) ahead of module migrations (0002+)\n", colorLabel.Sprint("baseline:"))
+	}
 	fmt.Fprintf(out, "%s lock_timeout=%s statement_timeout=%s\n", colorLabel.Sprint("connection:"), o.lockTO, o.stmtTO)
 
-	res, err := migrate.NewForkApplier().Migrate(context.Background(), connDSN, migrate.Source{Path: dir}, store)
+	res, err := migrate.NewForkApplier().Migrate(context.Background(), connDSN, src, store)
 	if err != nil {
 		return err
 	}
@@ -513,7 +556,14 @@ func runMigrateStatus(cmd *cobra.Command, o *migrateOpts) error {
 	if err != nil {
 		return err
 	}
-	st, err := migrate.NewForkApplier().Status(context.Background(), rawDSN, migrate.Source{Path: dir})
+	// Status must measure against the SAME composed set `up` applies, so an SDK
+	// service's framework baseline (0001) counts toward the on-disk target.
+	src, cleanup, _, err := migrate.ComposeSource(dir)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	st, err := migrate.NewForkApplier().Status(context.Background(), rawDSN, src)
 	if err != nil {
 		return err
 	}
@@ -525,9 +575,17 @@ func runMigrateStatus(cmd *cobra.Command, o *migrateOpts) error {
 	} else {
 		fmt.Fprintf(out, "dirty:           no\n")
 	}
-	if st.UpToDate() {
+	switch {
+	case st.UpToDate():
 		fmt.Fprintf(out, "%s up to date\n", colorSuccess.Sprint("ok:"))
-	} else if !st.Dirty {
+	case st.Dirty:
+		// The dirty line above already told the story; nothing to add.
+	case st.CurrentVersion > st.TargetVersion:
+		// Deploying an older source rolls the schema back; report it without a
+		// uint underflow (TargetVersion-CurrentVersion would wrap otherwise).
+		fmt.Fprintf(out, "%s ahead of target by %d version(s) (`de migrate up` rolls back to v%d)\n",
+			colorWarning.Sprint("pending:"), st.CurrentVersion-st.TargetVersion, st.TargetVersion)
+	default:
 		fmt.Fprintf(out, "%s %d migration(s) pending\n", colorWarning.Sprint("pending:"), st.TargetVersion-st.CurrentVersion)
 	}
 	return nil
@@ -561,12 +619,23 @@ func runMigrateVerify(cmd *cobra.Command, o *migrateOpts) error {
 	if err != nil {
 		return err
 	}
-	st, err := migrate.NewForkApplier().Status(context.Background(), rawDSN, migrate.Source{Path: dir})
+	// Verify against the SAME composed set `up` applies (framework baseline
+	// included for an SDK service).
+	src, cleanup, _, err := migrate.ComposeSource(dir)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	st, err := migrate.NewForkApplier().Status(context.Background(), rawDSN, src)
 	if err != nil {
 		return err
 	}
 	if st.Dirty {
 		return fmt.Errorf("schema is dirty (last migration failed part-way at v%d); run `de migrate up` to recover", st.CurrentVersion)
+	}
+	if st.CurrentVersion > st.TargetVersion {
+		return fmt.Errorf("schema at v%d is ahead of the on-disk target v%d (%d version(s) to roll back); run `de migrate up`",
+			st.CurrentVersion, st.TargetVersion, st.CurrentVersion-st.TargetVersion)
 	}
 	if st.CurrentVersion != st.TargetVersion {
 		return fmt.Errorf("schema at v%d but on-disk target is v%d (%d migration(s) unapplied); run `de migrate up`",

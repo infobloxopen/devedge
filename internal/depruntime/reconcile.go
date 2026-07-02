@@ -207,9 +207,18 @@ func (r *Reconciler) applyMigrations(ctx context.Context, service string, d Dep,
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("prepare down-store: %w", err)
 	}
+	// Compose the SDK framework baseline (0001) ahead of the module's on-disk
+	// migrations (0002+) when the service depends on the SDK migration engine, so
+	// `de project up` applies the SAME version space the service applies at Serve
+	// (idempotent convergence). A raw/non-SDK dep composes nothing.
+	src, cleanup, _, err := migrate.ComposeSource(d.Migrations)
+	if err != nil {
+		return nil, fmt.Errorf("compose migrations: %w", err)
+	}
+	defer cleanup()
 	ctx, cancel := context.WithTimeout(ctx, r.migrateTimeout)
 	defer cancel()
-	out, err := r.applier.Migrate(ctx, realDSN, migrate.Source{Path: d.Migrations}, store)
+	out, err := r.applier.Migrate(ctx, realDSN, src, store)
 	if err != nil {
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
