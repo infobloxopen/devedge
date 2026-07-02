@@ -40,10 +40,11 @@ func apiPublishCmd() *cobra.Command {
 		serviceDir    string
 		submit        bool
 		skipGenerate  bool
-		client        bool
-		clientOut     string
-		clientScope   string
-		publishClient bool
+		client          bool
+		clientOut       string
+		clientScope     string
+		clientGenerator string
+		publishClient   bool
 	)
 
 	cmd := &cobra.Command{
@@ -188,7 +189,7 @@ Examples:
 			// 4. Optionally generate (or publish) a typed TS/Angular client from
 			// the same flat spec.
 			if client {
-				if err := runClientStep(cmd, dir, srcSpec, apiPath.svc, version, clientOut, clientScope, publishClient); err != nil {
+				if err := runClientStep(cmd, dir, srcSpec, apiPath.svc, version, clientOut, clientScope, clientGenerator, publishClient); err != nil {
 					return err
 				}
 			}
@@ -206,7 +207,8 @@ Examples:
 	cmd.Flags().BoolVar(&skipGenerate, "skip-generate", false, "Skip 'de generate'; use the existing openapi/<svc>.openapi.yaml")
 	cmd.Flags().BoolVar(&client, "client", false, "After publishing the spec, also generate a typed TS/Angular client via 'apx client generate'")
 	cmd.Flags().StringVar(&clientOut, "client-out", "", "Output directory for the generated client (default: clients/<svc>-client under the service dir)")
-	cmd.Flags().StringVar(&clientScope, "client-scope", "", "npm scope for the generated client package, e.g. @acme (optional)")
+	cmd.Flags().StringVar(&clientScope, "client-scope", "", "npm scope for the generated client package, e.g. @acme (optional; ignored for --client-generator go)")
+	cmd.Flags().StringVar(&clientGenerator, "client-generator", "typescript-angular", "client generator: typescript-angular or go (for go, the package name is used as the Go module path)")
 	cmd.Flags().BoolVar(&publishClient, "publish-client", false, "Publish the client to GitHub Packages via 'apx client publish --dry-run=false' (implies --client)")
 
 	_ = cmd.MarkFlagRequired("api-id")
@@ -299,7 +301,7 @@ func arrangeSpec(srcSpec, destDir, destSpec string) error {
 // (default: clients/<svc>-client under the service dir). scope is an optional
 // npm scope (e.g. @acme). version stamps the package. When publish is true it
 // runs `apx client publish --dry-run=false`; otherwise `apx client generate`.
-func runClientStep(cmd *cobra.Command, dir, srcSpec, svc, version, clientOut, scope string, publish bool) error {
+func runClientStep(cmd *cobra.Command, dir, srcSpec, svc, version, clientOut, scope, generator string, publish bool) error {
 	if _, err := os.Stat(srcSpec); os.IsNotExist(err) {
 		return fmt.Errorf("client: spec not found at %s — run without --skip-generate, or generate the spec first", srcSpec)
 	}
@@ -323,6 +325,12 @@ func runClientStep(cmd *cobra.Command, dir, srcSpec, svc, version, clientOut, sc
 	}
 	if scope != "" {
 		args = append(args, "--scope", scope)
+	}
+	// Pass --generator only when non-default so the default TS/Angular invocation
+	// is unchanged. For --client-generator go, apx treats --package as the Go
+	// module path and ignores --scope.
+	if generator != "" && generator != "typescript-angular" {
+		args = append(args, "--generator", generator)
 	}
 	if publish {
 		// 'apx client publish' always builds; --dry-run=false actually publishes
