@@ -21,10 +21,14 @@ BINS     := de devedged devedge-dns-webhook
 
 all: test build ## Run tests then build
 
+# devedge builds `de` itself, so its own Makefile does NOT delegate to `de`
+# (that would be a bootstrap/CI chicken-and-egg). The `de sync` shim model is for
+# consumer service projects. We still apply `-trimpath` uniformly for a
+# reproducible build, matching `de build`, `de image`, and .goreleaser.yaml.
 build: ## Compile all binaries into bin/
-	go build -ldflags "$(LDFLAGS)" -o bin/de ./cmd/de
-	go build -ldflags "$(LDFLAGS)" -o bin/devedged ./cmd/devedged
-	go build -ldflags "$(LDFLAGS)" -o bin/devedge-dns-webhook ./cmd/devedge-dns-webhook
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/de ./cmd/de
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/devedged ./cmd/devedged
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/devedge-dns-webhook ./cmd/devedge-dns-webhook
 
 test: ## Run the test suite
 	go test ./...

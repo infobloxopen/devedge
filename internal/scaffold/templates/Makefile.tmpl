@@ -1,31 +1,21 @@
-.PHONY: generate build test run
+# {{.Name}} — top-level Makefile (hand-owned).
+#
+# `de` is the hermetic build authority: it owns codegen, build, test, lint, and
+# the container image, with the buf CLI + codegen plugins PINNED by the `de`
+# binary. There are no unpinned tool installs here — that logic lives in `de`.
+# This Makefile just reads the managed shim `de sync` writes and adds the
+# project-specific target(s) below. (You already have `de` — you ran
+# `de project init`; regenerate the shim any time with `de sync`.)
+#
+# Fresh clone: internal/gen/ is generated code — run `de generate` first.
+#     de generate    # buf generate -> internal/gen/, then go mod tidy
+#     de build       # go build ./...
+#     de test        # go test ./...
+-include .devedge/make/devedge.mk
 
-# generate: preflight tool checks, then buf generate, then tidy.
-generate:
-	@if ! command -v buf >/dev/null 2>&1; then \
-		echo "ERROR: buf not found on PATH. Install: go install github.com/bufbuild/buf/cmd/buf@latest"; \
-		exit 1; \
-	fi
-	@if ! command -v protoc-gen-go >/dev/null 2>&1; then \
-		echo "ERROR: protoc-gen-go not found on PATH. Install: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest"; \
-		exit 1; \
-	fi
-	@if ! command -v protoc-gen-go-grpc >/dev/null 2>&1; then \
-		echo "ERROR: protoc-gen-go-grpc not found on PATH. Install: go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest"; \
-		exit 1; \
-	fi
-	@if ! command -v protoc-gen-grpc-gateway >/dev/null 2>&1; then \
-		echo "ERROR: protoc-gen-grpc-gateway not found on PATH. Install: go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest"; \
-		exit 1; \
-	fi
-	buf generate
-	go mod tidy
+.PHONY: run
 
-build:
-	go build ./...
-
-test:
-	go test ./...
-
+# Run the service locally (build + run the binary; it listens on :8080).
+# internal/gen/ is generated — run `de generate` first on a fresh clone.
 run:
 	go run ./cmd/{{.Name}} serve

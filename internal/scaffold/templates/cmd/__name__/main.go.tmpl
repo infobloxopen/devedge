@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	migratelib "github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
@@ -243,7 +244,9 @@ func resolveDSN(raw string) (string, error) {
 
 // toPgxURL normalizes a postgres DSN for the migrate engine's pgx/v5 driver
 // (scheme "pgx5"), defaulting sslmode=disable when unset: dev/CI Postgres has
-// no TLS (port-forward locally, in-cluster Service DNS in deploy mode).
+// no TLS (port-forward locally, in-cluster Service DNS in deploy mode). It also
+// applies lock_timeout/statement_timeout on the CONNECTION (the seatbelt) unless
+// the DSN already carries `options`.
 func toPgxURL(dsn string) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
@@ -258,9 +261,34 @@ func toPgxURL(dsn string) (string, error) {
 	q := u.Query()
 	if q.Get("sslmode") == "" {
 		q.Set("sslmode", "disable")
-		u.RawQuery = q.Encode()
 	}
+	if q.Get("options") == "" {
+		lock, statement := migrateConnTimeouts()
+		q.Set("options", fmt.Sprintf("-c lock_timeout=%d -c statement_timeout=%d", lock.Milliseconds(), statement.Milliseconds()))
+	}
+	u.RawQuery = q.Encode()
 	return u.String(), nil
+}
+
+// migrateConnTimeouts is the near-zero-downtime seatbelt: lock_timeout and
+// statement_timeout applied on the migration CONNECTION (never per file — a SET
+// line would break CREATE INDEX CONCURRENTLY). A contended migration then fails
+// fast, and devedge's deploy Job retries it in a quiet window, instead of queueing
+// behind live queries and stalling the database. Override per service with
+// DEVEDGE_LOCK_TIMEOUT / DEVEDGE_STATEMENT_TIMEOUT (Go durations, e.g. "5s").
+func migrateConnTimeouts() (lock, statement time.Duration) {
+	lock, statement = 2*time.Second, 60*time.Second
+	if v := os.Getenv("DEVEDGE_LOCK_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			lock = d
+		}
+	}
+	if v := os.Getenv("DEVEDGE_STATEMENT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			statement = d
+		}
+	}
+	return lock, statement
 }
 
 // migrationsDir prefers the in-image bundle (/migrations, see Dockerfile),
@@ -295,7 +323,7 @@ func copyMigrations(src, dst string) error {
 	return nil
 }
 
-// maxVersion finds the highest NNN prefix among NNN_name.up.sql files.
+// maxVersion finds the highest sequential prefix among NNNN_name.up.sql files.
 func maxVersion(dir string) (uint, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -317,7 +345,7 @@ func maxVersion(dir string) (uint, error) {
 		}
 	}
 	if max == 0 {
-		return 0, fmt.Errorf("no NNN_name.up.sql migrations found in %s", dir)
+		return 0, fmt.Errorf("no NNNN_name.up.sql migrations found in %s", dir)
 	}
 	return max, nil
 }

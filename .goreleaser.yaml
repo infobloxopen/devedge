@@ -13,6 +13,8 @@ builds:
     binary: de
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
     goos:
       - darwin
       - linux
@@ -29,6 +31,8 @@ builds:
     binary: devedged
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
     goos:
       - darwin
       - linux
@@ -45,6 +49,8 @@ builds:
     binary: devedge-dns-webhook
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
     goos:
       - darwin
       - linux

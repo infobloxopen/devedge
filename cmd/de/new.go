@@ -95,7 +95,8 @@ Examples:
 			fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("wrote"), res.DevedgeYAML)
 			fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Next steps:"))
 			fmt.Fprintf(out, "  cd %s\n", res.Dir)
-			fmt.Fprintf(out, "  make test                 %s\n", colorLabel.Sprint("# build + boot + smoke (devedge-sdk scaffold)"))
+			fmt.Fprintf(out, "  de generate               %s\n", colorLabel.Sprint("# regenerate gen/ (buf + pinned plugins); gen/ is git-ignored"))
+			fmt.Fprintf(out, "  de test                   %s\n", colorLabel.Sprint("# build + boot + smoke (or: make test — the Makefile delegates to de)"))
 			fmt.Fprintf(out, "  de project up             %s\n", colorLabel.Sprint("# register the route through the edge"))
 			fmt.Fprintf(out, "  %s\n", colorLabel.Sprintf("# then: https://%s%s/v1/...", res.GatewayHost, res.EdgePath))
 			return nil

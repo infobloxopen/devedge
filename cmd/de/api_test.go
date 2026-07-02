@@ -109,8 +109,8 @@ func TestArrangeSpec_MissingSource(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing source spec")
 	}
-	if !strings.Contains(err.Error(), "make generate") {
-		t.Errorf("error should mention 'make generate', got: %v", err)
+	if !strings.Contains(err.Error(), "de generate") {
+		t.Errorf("error should mention 'de generate', got: %v", err)
 	}
 }
 

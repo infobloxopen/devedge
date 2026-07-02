@@ -75,8 +75,8 @@ func renameResource(t *testing.T, proj string) {
 	// File renames: the proto and the migration pair carry the resource name.
 	renames := map[string]string{
 		"proto/notesvc/v1/webhook_endpoint.proto":   "proto/notesvc/v1/note.proto",
-		"db/migrations/001_webhook_endpoints.up.sql":   "db/migrations/001_notes.up.sql",
-		"db/migrations/001_webhook_endpoints.down.sql": "db/migrations/001_notes.down.sql",
+		"db/migrations/0001_webhook_endpoints.up.sql":   "db/migrations/0001_notes.up.sql",
+		"db/migrations/0001_webhook_endpoints.down.sql": "db/migrations/0001_notes.down.sql",
 	}
 	for from, to := range renames {
 		if err := os.Rename(filepath.Join(proj, from), filepath.Join(proj, to)); err != nil {
