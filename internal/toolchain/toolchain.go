@@ -43,6 +43,10 @@ const (
 	ProtocGenGoGRPCVersion = "v1.5.1"
 	// ProtocGenGRPCGatewayVersion pins protoc-gen-grpc-gateway (matches scaffold Gateway).
 	ProtocGenGRPCGatewayVersion = "v2.27.4"
+	// ProtocGenOpenAPIV2Version pins protoc-gen-openapiv2. It ships in the SAME
+	// module as protoc-gen-grpc-gateway (grpc-gateway/v2), so its version is the
+	// Gateway version by construction — they can never drift.
+	ProtocGenOpenAPIV2Version = ProtocGenGRPCGatewayVersion
 )
 
 // Tool module paths. These are the `go run`/`go install` targets.
@@ -54,6 +58,21 @@ const (
 	ProtocGenGoModule          = "google.golang.org/protobuf/cmd/protoc-gen-go"
 	ProtocGenGoGRPCModule      = "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 	ProtocGenGRPCGatewayModule = "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway"
+	ProtocGenOpenAPIV2Module   = "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2"
+
+	// SDKModule is the devedge-sdk module. Its codegen plugins and the
+	// openapiv2->v3 converter live under SDKModule/cmd/<bin>. Unlike the public
+	// plugins above (pinned by THIS binary), an SDK plugin is pinned to the
+	// SERVICE's resolved devedge-sdk version (`go list -m` in the service dir):
+	// that pin is what keeps generated code matching the SDK a service compiles
+	// against. `de generate` resolves it per project.
+	SDKModule = "github.com/infobloxopen/devedge-sdk"
+
+	// OpenAPIV2To3Bin is the devedge-sdk tool that converts the OpenAPI v2
+	// (swagger.json) protoc-gen-openapiv2 emits into OpenAPI v3, in place under
+	// openapi/. It is not a buf `local:` plugin (buf never invokes it) — `de
+	// generate` runs it as a post-step, pinned to the service's SDK version.
+	OpenAPIV2To3Bin = "openapiv2to3"
 )
 
 // Plugin is a buf codegen plugin `de generate` makes available on PATH.
@@ -66,15 +85,49 @@ type Plugin struct {
 	Version string
 }
 
-// BufPlugins are the codegen plugins the scaffold's buf.gen.yaml references by
-// bare name (`local: protoc-gen-go`, ...). `de generate` installs exactly these
-// pinned versions into a cache bindir and puts that dir first on PATH, so buf
-// resolves the pinned plugins rather than whatever is on the host PATH.
+// BufPlugins are the PUBLIC codegen plugins `de generate` knows how to pin. A
+// scaffold's buf.gen.yaml references them by bare name (`local: protoc-gen-go`,
+// ...); `de generate` installs the ones a given buf.gen.yaml actually references,
+// at these pinned versions, into a cache bindir it puts first on PATH — so buf
+// resolves the pinned plugins rather than whatever is on the host PATH. The SDK
+// scaffold additionally references SDK-provided plugins (see IsSDKPlugin), which
+// are pinned to the service's SDK version, not to a version baked in here.
 var BufPlugins = []Plugin{
 	{Bin: "protoc-gen-go", Module: ProtocGenGoModule, Version: ProtocGenGoVersion},
 	{Bin: "protoc-gen-go-grpc", Module: ProtocGenGoGRPCModule, Version: ProtocGenGoGRPCVersion},
 	{Bin: "protoc-gen-grpc-gateway", Module: ProtocGenGRPCGatewayModule, Version: ProtocGenGRPCGatewayVersion},
+	{Bin: "protoc-gen-openapiv2", Module: ProtocGenOpenAPIV2Module, Version: ProtocGenOpenAPIV2Version},
 }
+
+// PublicPlugin returns the pinned public plugin for a buf `local:` bin name, and
+// whether `de` knows how to pin it.
+func PublicPlugin(bin string) (Plugin, bool) {
+	for _, p := range BufPlugins {
+		if p.Bin == bin {
+			return p, true
+		}
+	}
+	return Plugin{}, false
+}
+
+// sdkPluginBins are the buf `local:` plugin bin names the SDK scaffold's
+// buf.gen.yaml references that are PROVIDED BY the devedge-sdk module (installed
+// at the service's SDK version). protoc-gen-storage is the gorm path;
+// protoc-gen-ent is the ent path; a given buf.gen.yaml references one, not both.
+var sdkPluginBins = map[string]bool{
+	"protoc-gen-devedge-authz": true,
+	"protoc-gen-svc":           true,
+	"protoc-gen-storage":       true,
+	"protoc-gen-ent":           true,
+}
+
+// IsSDKPlugin reports whether a buf `local:` plugin bin name is provided by the
+// devedge-sdk module (so it is pinned to the service's SDK version, not by `de`).
+func IsSDKPlugin(bin string) bool { return sdkPluginBins[bin] }
+
+// SDKCmd returns the `go install` target for a devedge-sdk command (a codegen
+// plugin or the openapiv2to3 tool) by its binary name: SDKModule/cmd/<bin>.
+func SDKCmd(bin string) string { return SDKModule + "/cmd/" + bin }
 
 // Ref returns the "module@version" form used by `go run` / `go install`.
 func Ref(module, version string) string { return module + "@" + version }

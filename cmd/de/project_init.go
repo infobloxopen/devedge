@@ -28,7 +28,7 @@ devedge-managed service:
 After scaffolding, the project is immediately usable:
 
   cd NAME
-  make generate        # run protoc + authz codegen
+  de generate          # run protoc + authz codegen (buf + pinned plugins)
   de project up        # register routes and start dependencies
 
 For a full walk-through of the generated layout see AGENTS.md inside the
@@ -64,7 +64,7 @@ Flags:
 			fmt.Printf("%s %s\n", colorLabel.Sprint("scaffolded"), colorHost.Sprint(name))
 			fmt.Printf("\n%s\n", colorHeader.Sprint("Next steps:"))
 			fmt.Printf("  cd %s\n", name)
-			fmt.Printf("  make generate\n")
+			fmt.Printf("  de generate          %s\n", colorLabel.Sprint("# regenerate internal/gen (buf + pinned plugins)"))
 			fmt.Printf("  de project up\n")
 			fmt.Printf("  %s\n", colorLabel.Sprint("# see AGENTS.md for the full walk-through"))
 			return nil

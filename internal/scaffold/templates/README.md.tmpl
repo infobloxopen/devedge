@@ -7,17 +7,18 @@ it into your own resource.
 ## Prerequisites
 
 - **Go {{.GoVersion}}+**
-- **buf** — `go install github.com/bufbuild/buf/cmd/buf@latest`
-- **protoc-gen-go** — `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`
-- **protoc-gen-go-grpc** — `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`
-- **protoc-gen-grpc-gateway** — `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest`
+- **`de`** — the devedge build authority. It installs and pins the buf CLI + codegen plugins
+  for you, so there is nothing else to put on PATH. `de generate` / `de build` / `de test` own
+  the build; the `Makefile` reads `.devedge/make/devedge.mk` (written by `de sync`) and
+  delegates to `de`, so `make ...` works too. (You already have `de` — you ran `de project init`.)
 - **devedge** running locally (`de cluster start` if not already up)
 
 ## Development loop
 
 ```sh
-# 1. Regenerate gRPC + gateway code after editing the proto
-make generate
+# 1. Regenerate gRPC + gateway code after editing the proto (buf + pinned plugins).
+#    internal/gen/ is generated — run this first on a fresh clone.
+de generate
 
 # 2. Bring up the service (postgres dependency included)
 de project up

@@ -23,6 +23,7 @@ func TestNoAtLatest(t *testing.T) {
 		"protoc-gen-go":           ProtocGenGoVersion,
 		"protoc-gen-go-grpc":      ProtocGenGoGRPCVersion,
 		"protoc-gen-grpc-gateway": ProtocGenGRPCGatewayVersion,
+		"protoc-gen-openapiv2":    ProtocGenOpenAPIV2Version,
 	}
 	for name, v := range versions {
 		if v == "" || v == "latest" || strings.Contains(v, "latest") {
@@ -34,10 +35,17 @@ func TestNoAtLatest(t *testing.T) {
 	}
 }
 
-// TestBufPluginsComplete asserts the three codegen plugins the scaffold's
-// buf.gen.yaml references are all present and pinned.
+// TestBufPluginsComplete asserts the public codegen plugins the scaffolds'
+// buf.gen.yaml files reference are all present and pinned. openapiv2 ships in the
+// same module as grpc-gateway; it is included because the SDK scaffold's
+// buf.gen.yaml emits an OpenAPI surface with it.
 func TestBufPluginsComplete(t *testing.T) {
-	want := map[string]bool{"protoc-gen-go": false, "protoc-gen-go-grpc": false, "protoc-gen-grpc-gateway": false}
+	want := map[string]bool{
+		"protoc-gen-go":           false,
+		"protoc-gen-go-grpc":      false,
+		"protoc-gen-grpc-gateway": false,
+		"protoc-gen-openapiv2":    false,
+	}
 	for _, p := range BufPlugins {
 		if _, ok := want[p.Bin]; !ok {
 			t.Errorf("unexpected plugin %q", p.Bin)
@@ -51,6 +59,28 @@ func TestBufPluginsComplete(t *testing.T) {
 		if !seen {
 			t.Errorf("missing pinned plugin %q", bin)
 		}
+	}
+}
+
+// TestSDKPluginClassification pins the gorm/ent backend split: storage is the
+// gorm-path SDK plugin, ent the ent-path one, and public plugins are never
+// classified as SDK plugins (they are pinned by `de`, not by the service's SDK).
+func TestSDKPluginClassification(t *testing.T) {
+	for _, bin := range []string{"protoc-gen-devedge-authz", "protoc-gen-svc", "protoc-gen-storage", "protoc-gen-ent"} {
+		if !IsSDKPlugin(bin) {
+			t.Errorf("%q should be an SDK plugin", bin)
+		}
+	}
+	for _, bin := range []string{"protoc-gen-go", "protoc-gen-go-grpc", "protoc-gen-grpc-gateway", "protoc-gen-openapiv2"} {
+		if IsSDKPlugin(bin) {
+			t.Errorf("%q is public, must not be classified as an SDK plugin", bin)
+		}
+		if _, ok := PublicPlugin(bin); !ok {
+			t.Errorf("%q must be a known public plugin", bin)
+		}
+	}
+	if got := SDKCmd("protoc-gen-svc"); got != "github.com/infobloxopen/devedge-sdk/cmd/protoc-gen-svc" {
+		t.Errorf("SDKCmd = %q", got)
 	}
 }
 

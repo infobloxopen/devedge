@@ -13,6 +13,8 @@ import (
 	"text/template"
 
 	"github.com/infobloxopen/devedge-sdk/apilayout"
+
+	"github.com/infobloxopen/devedge/internal/makefrag"
 )
 
 //go:embed all:templates
@@ -213,6 +215,12 @@ func Render(p Params) error {
 	if err != nil {
 		return err
 	}
+
+	// The managed build shim `de sync` writes: generate/build/test/lint/image/
+	// migrate-lint delegating to `de`. The thin top-level Makefile `-include`s it.
+	// Emitted from the canonical makefrag source (byte-identical to `de sync`), so
+	// there is no second copy to drift; `de sync` regenerates it idempotently.
+	out = append(out, outFile{rel: makefrag.RelPath, body: makefrag.Content(), mode: fs.FileMode(0o644)})
 
 	wrote := false
 	cleanup := func() {

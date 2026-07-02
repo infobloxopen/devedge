@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/infobloxopen/devedge/internal/makefrag"
 	"github.com/infobloxopen/devedge/internal/toolchain"
@@ -82,35 +83,235 @@ version always generates with the same tools. Requires a buf config
 }
 
 // runGenerate is the shared codegen routine used by `de generate` and
-// `de api publish`. It puts the pinned buf plugins first on PATH, runs the
-// pinned buf, then tidies the module.
+// `de api publish`. It reproduces the SDK scaffold's `make generate` flow
+// hermetically, backend-aware from the service's buf.gen.yaml:
+//
+//  1. install the plugins buf.gen.yaml drives — public plugins pinned by `de`,
+//     SDK plugins (protoc-gen-{devedge-authz,svc,ent|storage}) pinned to the
+//     SERVICE's resolved devedge-sdk version — into a version-keyed cache bindir
+//     put first on PATH;
+//  2. lock proto deps if the tree never has (guarded buf dep update);
+//  3. run the pinned buf;
+//  4. convert the emitted OpenAPI v2 surface to v3 with the SDK's openapiv2to3;
+//  5. run the entc second step (go get seed + go generate ./gen/ent) when the
+//     backend is ent;
+//  6. go mod tidy.
 func runGenerate(cmd *cobra.Command, dir string) error {
 	if !hasBufConfig(dir) {
 		return fmt.Errorf("no buf config (buf.gen.yaml) found in %s — is this a service project?", dir)
 	}
 	out := cmd.OutOrStdout()
 
-	// 1. Install the pinned codegen plugins into a version-keyed cache bindir and
-	//    put it first on PATH so buf's `local:` plugins resolve to the pinned
-	//    versions, not whatever is on the host PATH.
-	binDir, err := ensureBufPlugins(cmd)
+	// 1. Resolve which codegen plugins buf.gen.yaml drives and pin each one:
+	//    public plugins by `de`, SDK plugins by the service's own SDK version.
+	plan, err := planGenerate(cmd, dir)
+	if err != nil {
+		return err
+	}
+	binDir, err := ensurePlugins(cmd, plan.plugins)
 	if err != nil {
 		return err
 	}
 	env := []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH")}
+	bufRef := toolchain.Ref(toolchain.BufModule, toolchain.BufVersion)
 
-	// 2. Run the pinned buf.
+	// 2. Lock the proto deps (google/api/*) if the tree never has — self-heals a
+	//    tree scaffolded with --no-generate. A committed buf.lock is left as-is,
+	//    so reproducibility is preserved.
+	if !hasBufLock(dir) {
+		fmt.Fprintf(out, "generate: buf dep update (no buf.lock yet)\n")
+		if err := runTool(cmd, dir, env, "go", "run", bufRef, "dep", "update"); err != nil {
+			return fmt.Errorf("buf dep update: %w", err)
+		}
+	}
+
+	// 3. Run the pinned buf.
 	fmt.Fprintf(out, "generate: buf %s generate (pinned plugins from %s)\n", toolchain.BufVersion, binDir)
-	if err := runTool(cmd, dir, env, "go", "run", toolchain.Ref(toolchain.BufModule, toolchain.BufVersion), "generate"); err != nil {
+	if err := runTool(cmd, dir, env, "go", "run", bufRef, "generate"); err != nil {
 		return fmt.Errorf("buf generate: %w", err)
 	}
 
-	// 3. Tidy — generated imports may have changed the module graph.
+	// 4. Convert the emitted OpenAPI v2 surface to v3, in place under openapi/.
+	if plan.openapi {
+		if err := runOpenAPIV2To3(cmd, dir, binDir); err != nil {
+			return err
+		}
+	}
+
+	// 5. ent is a TWO-STEP generate: protoc-gen-ent (run by buf) emitted the ent
+	//    SCHEMAS + the repository adapter; entc turns the schemas into the ent
+	//    CLIENT. `go get` seeds the entc tool + the SDK packages the schema/adapter
+	//    import into go.sum WITHOUT building the module (a bare tidy here trips over
+	//    the not-yet-generated gen/ent/* imports and prints an alarming remote-repo
+	//    error), then `go generate` runs entc, then the clean tidy runs last.
+	if plan.ent {
+		fmt.Fprintf(out, "generate: seeding ent codegen toolchain (go.sum)\n")
+		if err := runTool(cmd, dir, nil, "go", "get",
+			"entgo.io/ent/cmd/ent",
+			toolchain.SDKModule+"/persistence/entrepo",
+			toolchain.SDKModule+"/middleware",
+			toolchain.SDKModule+"/persistence/resourcename",
+		); err != nil {
+			return fmt.Errorf("seed ent codegen toolchain (go get): %w", err)
+		}
+		fmt.Fprintf(out, "generate: go generate ./gen/ent (entc client)\n")
+		if err := runTool(cmd, dir, nil, "go", "generate", "./gen/ent"); err != nil {
+			return fmt.Errorf("go generate ./gen/ent (entc): %w", err)
+		}
+	}
+
+	// 6. Tidy — generated imports may have changed the module graph.
 	fmt.Fprintf(out, "generate: go mod tidy\n")
 	if err := runTool(cmd, dir, nil, "go", "mod", "tidy"); err != nil {
 		return fmt.Errorf("go mod tidy: %w", err)
 	}
 	fmt.Fprintf(out, "%s\n", colorSuccess.Sprint("generate ok"))
+	return nil
+}
+
+// genPlan is the codegen plan resolved from a service's buf.gen.yaml.
+type genPlan struct {
+	plugins []toolchain.Plugin // every tool to install (public + SDK plugins + openapiv2to3), deduped
+	openapi bool               // buf emits an OpenAPI surface -> run openapiv2to3
+	ent     bool               // backend is ent -> run the entc second step
+}
+
+// planGenerate reads dir's buf.gen.yaml, classifies each `local:` plugin, and
+// resolves the full install plan. Public plugins are pinned by `de`; SDK plugins
+// (and the openapiv2to3 tool) are pinned to the service's resolved devedge-sdk
+// version — that pin is what keeps generated code matching the SDK the service
+// compiles against. An unrecognized local plugin fails loudly: `de` cannot
+// install it hermetically.
+func planGenerate(cmd *cobra.Command, dir string) (genPlan, error) {
+	locals, err := bufLocalPlugins(dir)
+	if err != nil {
+		return genPlan{}, err
+	}
+	var plan genPlan
+	// First learn whether we need the service's SDK version at all: any SDK
+	// plugin, or the openapiv2 surface (the SDK's openapiv2to3 converts it).
+	needSDK := false
+	for _, bin := range locals {
+		switch {
+		case toolchain.IsSDKPlugin(bin):
+			needSDK = true
+			if bin == "protoc-gen-ent" {
+				plan.ent = true
+			}
+		case bin == "protoc-gen-openapiv2":
+			plan.openapi = true
+			needSDK = true
+		}
+	}
+	var sdkVersion string
+	if needSDK {
+		if sdkVersion, err = resolveServiceSDKVersion(cmd, dir); err != nil {
+			return genPlan{}, err
+		}
+	}
+
+	seen := map[string]bool{}
+	add := func(p toolchain.Plugin) {
+		if !seen[p.Bin] {
+			seen[p.Bin] = true
+			plan.plugins = append(plan.plugins, p)
+		}
+	}
+	for _, bin := range locals {
+		if toolchain.IsSDKPlugin(bin) {
+			add(toolchain.Plugin{Bin: bin, Module: toolchain.SDKCmd(bin), Version: sdkVersion})
+			continue
+		}
+		p, ok := toolchain.PublicPlugin(bin)
+		if !ok {
+			return genPlan{}, fmt.Errorf("buf.gen.yaml references local plugin %q that `de generate` cannot install hermetically "+
+				"(not a known public plugin and not a devedge-sdk plugin)", bin)
+		}
+		add(p)
+	}
+	// openapiv2 emits swagger.json (OpenAPI v2); the SDK's openapiv2to3 rewrites
+	// it to v3. It is a post-step tool, not a buf plugin, but is installed into
+	// the same version-keyed bindir.
+	if plan.openapi {
+		add(toolchain.Plugin{Bin: toolchain.OpenAPIV2To3Bin, Module: toolchain.SDKCmd(toolchain.OpenAPIV2To3Bin), Version: sdkVersion})
+	}
+	return plan, nil
+}
+
+// bufLocalPlugins returns the `local:` plugin bin names buf.gen.yaml drives, in
+// file order (reading whichever of buf.gen.yaml / buf.gen.yml exists).
+func bufLocalPlugins(dir string) ([]string, error) {
+	path := bufConfigPath(dir)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var cfg struct {
+		Plugins []struct {
+			Local yaml.Node `yaml:"local"`
+		} `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var out []string
+	for _, p := range cfg.Plugins {
+		// `local:` is a scalar bin name in the scaffolds. buf also allows a
+		// sequence (a custom command); `de` does not manage those (buf resolves
+		// them itself off PATH), so non-scalar entries are skipped.
+		if p.Local.Kind == yaml.ScalarNode && p.Local.Value != "" {
+			out = append(out, p.Local.Value)
+		}
+	}
+	return out, nil
+}
+
+// resolveServiceSDKVersion resolves the devedge-sdk version the service in dir
+// depends on, from its go.mod (via `go list -m`). This mirrors the scaffold
+// Makefile's `SDK_VERSION := go list -m devedge-sdk`: go.mod is the single source
+// of truth the SDK-versioned plugins pin to.
+func resolveServiceSDKVersion(cmd *cobra.Command, dir string) (string, error) {
+	c := exec.CommandContext(cmd.Context(), "go", "list", "-m", "-f", "{{.Version}}", toolchain.SDKModule)
+	c.Dir = dir
+	var stdout, stderr strings.Builder
+	c.Stdout = &stdout
+	c.Stderr = &stderr
+	if err := c.Run(); err != nil {
+		return "", fmt.Errorf("resolve %s version from go.mod in %s: %w\n%s\n"+
+			"(is this a devedge-sdk service? try `go mod download` first)",
+			toolchain.SDKModule, dir, err, strings.TrimSpace(stderr.String()))
+	}
+	v := strings.TrimSpace(stdout.String())
+	if v == "" {
+		return "", fmt.Errorf("%s is not required by the module in %s — its go.mod must depend on devedge-sdk to generate", toolchain.SDKModule, dir)
+	}
+	return v, nil
+}
+
+// runOpenAPIV2To3 converts the OpenAPI v2 (swagger.json) files protoc-gen-openapiv2
+// emitted under openapi/ into OpenAPI v3, in place, with the SDK's pinned
+// openapiv2to3 (in binDir). Mirrors the scaffold Makefile step
+// `openapiv2to3 openapi/<bin>.swagger.json openapi`.
+func runOpenAPIV2To3(cmd *cobra.Command, dir, binDir string) error {
+	swaggers, err := filepath.Glob(filepath.Join(dir, "openapi", "*.swagger.json"))
+	if err != nil {
+		return fmt.Errorf("scan openapi/: %w", err)
+	}
+	if len(swaggers) == 0 {
+		return fmt.Errorf("openapiv2->v3: no openapi/*.swagger.json found after buf generate (expected an OpenAPI v2 surface)")
+	}
+	tool := filepath.Join(binDir, toolchain.OpenAPIV2To3Bin)
+	out := cmd.OutOrStdout()
+	for _, sw := range swaggers {
+		rel, err := filepath.Rel(dir, sw)
+		if err != nil {
+			rel = sw
+		}
+		fmt.Fprintf(out, "generate: openapiv2to3 %s -> openapi/ (v3)\n", filepath.Base(sw))
+		if err := runTool(cmd, dir, nil, tool, rel, "openapi"); err != nil {
+			return fmt.Errorf("openapiv2to3 %s: %w", rel, err)
+		}
+	}
 	return nil
 }
 
@@ -124,25 +325,41 @@ func hasBufConfig(dir string) bool {
 	return false
 }
 
-// ensureBufPlugins installs the pinned buf codegen plugins into a cache bindir
-// keyed by their versions, so it installs once per version-set and is a no-op
-// thereafter. It returns the bindir to prepend to PATH.
-func ensureBufPlugins(cmd *cobra.Command) (string, error) {
+// bufConfigPath returns the buf generate config in dir (preferring buf.gen.yaml).
+func bufConfigPath(dir string) string {
+	for _, name := range []string{"buf.gen.yaml", "buf.gen.yml"} {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(dir, "buf.gen.yaml")
+}
+
+// hasBufLock reports whether dir has a committed buf.lock (proto deps already locked).
+func hasBufLock(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "buf.lock"))
+	return err == nil
+}
+
+// ensurePlugins installs plugins into a cache bindir keyed by their exact
+// bin+module+version set, so it installs once per set and is a no-op thereafter:
+// a version bump — of a public plugin OR of the service's SDK — lands in a fresh
+// dir, never a stale binary. It returns the bindir to prepend to PATH.
+func ensurePlugins(cmd *cobra.Command, plugins []toolchain.Plugin) (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil || base == "" {
 		base = os.TempDir()
 	}
-	// Key the bindir by the exact plugin version-set so a version bump lands in a
-	// fresh dir (no stale binaries).
 	h := sha256.New()
-	for _, p := range toolchain.BufPlugins {
-		fmt.Fprintf(h, "%s@%s\n", p.Module, p.Version)
+	for _, p := range plugins {
+		fmt.Fprintf(h, "%s\t%s@%s\n", p.Bin, p.Module, p.Version)
 	}
 	key := hex.EncodeToString(h.Sum(nil))[:12]
 	binDir := filepath.Join(base, "devedge", "toolchain", key, "bin")
 
 	var missing []toolchain.Plugin
-	for _, p := range toolchain.BufPlugins {
+	for _, p := range plugins {
 		if _, err := os.Stat(filepath.Join(binDir, p.Bin)); err != nil {
 			missing = append(missing, p)
 		}
@@ -311,6 +528,15 @@ Any tokens after '--' are forwarded verbatim to ko.`,
 				"KO_DOCKER_REPO=" + repo,
 				"KO_DEFAULTBASEIMAGE=" + baseImage,
 			}
+			// A local (ko.local) build must reach the Docker daemon. Docker Desktop,
+			// Rancher Desktop, colima, and plain Linux all put the socket in
+			// different places, so if DOCKER_HOST is unset, autodetect it from the
+			// active docker context (best-effort — matches the old `make image`).
+			if os.Getenv("DOCKER_HOST") == "" {
+				if h := dockerHostFromContext(cmd); h != "" {
+					env = append(env, "DOCKER_HOST="+h)
+				}
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "image: ko %s build (base %s, -trimpath, repo %s, push=%t)\n",
 				toolchain.KoVersion, baseImage, repo, push)
 			if err := runTool(cmd, d, env, "go", koArgs...); err != nil {
@@ -326,6 +552,19 @@ Any tokens after '--' are forwarded verbatim to ko.`,
 	cmd.Flags().StringVar(&platform, "platform", "linux/amd64,linux/arm64", "target platforms")
 	cmd.Flags().StringVar(&baseImage, "base", "gcr.io/distroless/static:nonroot", "base image (distroless-static by default)")
 	return cmd
+}
+
+// dockerHostFromContext returns the active docker context's daemon endpoint, or
+// "" if docker is absent or reports nothing. Used to point a local `de image`
+// build at the right socket without the user setting DOCKER_HOST.
+func dockerHostFromContext(cmd *cobra.Command) string {
+	c := exec.CommandContext(cmd.Context(), "docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
+	var stdout strings.Builder
+	c.Stdout = &stdout
+	if err := c.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stdout.String())
 }
 
 // syncCmd is `de sync`: (re)write the managed Makefile fragment
