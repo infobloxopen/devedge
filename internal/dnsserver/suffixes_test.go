@@ -1,9 +1,11 @@
 package dnsserver
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestNewConfiguredSuffix_Canonicalizes(t *testing.T) {
@@ -173,6 +175,16 @@ func TestAuthoritativeSet_ConcurrentReplaceAndMatch(t *testing.T) {
 		})
 		s.Replace([]ConfiguredSuffix{mustSuffix(t, "dev.test")})
 	}
+
+	// dev.test is present in every snapshot, so any scheduled reader must observe
+	// a match. On a constrained runner the main goroutine can finish all Replaces
+	// before a reader is ever scheduled; wait (bounded) for readers to run so the
+	// assertion tests concurrency, not the scheduler's luck.
+	deadline := time.Now().Add(5 * time.Second)
+	for matches.Load() == 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+
 	close(stop)
 	wg.Wait()
 
