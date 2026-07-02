@@ -1,14 +1,28 @@
 {{- /*
-  Schema-migration hook Job (006). Rendered only when the service declares migrations
-  (.Values.migrations is set by the deploy path). Annotated as a pre-install/pre-upgrade
-  hook so Helm runs it to completion BEFORE the release's Deployment rolls (devedge installs
-  with `helm upgrade --install --wait`), guaranteeing the workload only ever serves against a
-  migrated schema (FR-003/FR-006-deploy).
+  Schema-migration hook Job (006 / WS-022). Rendered only when the service declares
+  migrations (.Values.migrations is set by the deploy path). Annotated as a
+  pre-install/pre-upgrade hook so Helm runs it to completion BEFORE the release's
+  Deployment rolls (devedge installs with `helm upgrade --install --wait`),
+  guaranteeing the workload only ever serves against a migrated schema
+  (FR-003/FR-006-deploy).
 
-  It runs the SERVICE'S OWN image (contract C2: `<image> migrate up`), which converges the
-  database to the image's bundled schema version — up or down by the relative version. The
-  persisted down-store is a devedge-side-provisioned PVC mounted here, so a down step survives
-  even when this image no longer ships it (FR-012).
+  It runs the SERVICE'S OWN image (contract C2: `<image> migrate up`), which converges
+  the database to the image's bundled schema version — up or down by the relative
+  version. The persisted down-store is a devedge-side-provisioned PVC mounted here, so
+  a down step survives even when this image no longer ships it (FR-012).
+
+  Unattended-apply guarantees (WS-022 §4):
+    * Runs BEFORE the workload rolls (hook-weight -5, pre-install/pre-upgrade + --wait).
+    * ONE migrator at a time — the infobloxopen/migrate engine holds a Postgres
+      advisory lock for the duration, so a rolling deploy cannot double-apply.
+    * Idempotent + dirty-state auto-recovery — a re-run no-ops when current, and a
+      prior part-way failure recovers from the persisted down-store (FR-007/FR-012).
+    * Fails fast — lock_timeout/statement_timeout on the migration CONNECTION (below)
+      make a contended migration abort rather than stall the database; the Job then
+      retries (backoffLimit) in a quieter window.
+    * Bounded — activeDeadlineSeconds caps total runtime; backoffLimit caps retries.
+    * Self-cleaning — hook-delete-policy removes a prior Job before re-creating and
+      deletes it on success; ttlSecondsAfterFinished GCs a leftover after failure.
 */ -}}
 {{- with .Values.migrations }}
 apiVersion: batch/v1
@@ -22,7 +36,13 @@ metadata:
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 1
+  # Retry a contended/failed migration a few times; with the connection lock_timeout
+  # each attempt fails fast and a later attempt lands in a quieter window.
+  backoffLimit: {{ .backoffLimit | default 3 }}
+  # Hard cap on total runtime so a stuck migration cannot block the deploy forever.
+  activeDeadlineSeconds: {{ .activeDeadlineSeconds | default 600 }}
+  # GC a Job left behind by a terminal failure (success is removed by hook-succeeded).
+  ttlSecondsAfterFinished: {{ .ttlSecondsAfterFinished | default 300 }}
   template:
     metadata:
       labels:
@@ -45,6 +65,13 @@ spec:
                   key: dsn
             - name: DEVEDGE_DOWNSTORE
               value: {{ .downStorePath | quote }}
+            # Near-zero-downtime seatbelt applied on the migration CONNECTION (the
+            # image's `migrate up` reads these). Never a per-file SET line — that
+            # would break CREATE INDEX CONCURRENTLY. Override per service via values.
+            - name: DEVEDGE_LOCK_TIMEOUT
+              value: {{ .lockTimeout | default "2s" | quote }}
+            - name: DEVEDGE_STATEMENT_TIMEOUT
+              value: {{ .statementTimeout | default "60s" | quote }}
           volumeMounts:
             - name: downstore
               mountPath: {{ .downStorePath }}

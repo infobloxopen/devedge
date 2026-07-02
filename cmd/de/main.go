@@ -60,6 +60,7 @@ func rootCmd() *cobra.Command {
 		newCmd(),
 		ufeCmd(),
 		projectCmd(),
+		migrateCmd(),
 		composeCmd(),
 		cellCmd(),
 		clusterCmd(),

@@ -389,8 +389,8 @@ What gets generated:
 - **Fail-closed server** — the server checks at boot that every RPC in the service descriptor
   has a declared authz rule; an undeclared method causes the process to refuse to start rather
   than silently serve open.
-- **Initial migration** — `001_create_webhook_endpoints.up.sql` / `.down.sql` to bootstrap the
-  schema.
+- **Initial migration** — `0001_webhook_endpoints.up.sql` / `.down.sql` (4-digit sequential
+  numbering) to bootstrap the schema.
 - **Dockerfile** — multi-stage build that produces a `migrate` subcommand alongside the server
   binary, satisfying the deploy hook contract (`de project up --deploy` runs `<image> migrate up`
   before the Deployment rolls).

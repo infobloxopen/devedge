@@ -33,7 +33,7 @@ with your own resource:
 1. Rename `proto/{{.ProtoPkg}}/v1/webhook_endpoint.proto` to match your resource name.
 2. Inside that file, rename the message, service, and all RPC names.
    Every RPC **must** carry an `(infoblox.authz.v1.rule)` option (or `public: true`).
-3. Update `db/migrations/001_*.sql` to reflect your table and columns.
+3. Update `db/migrations/0001_*.sql` to reflect your table and columns.
 4. Update `internal/server/server.go` and `internal/store/store.go` to use the new type names.
 5. Run `make generate` to regenerate `internal/gen/`.
 6. Run `make test` — all tests must pass before proceeding.
