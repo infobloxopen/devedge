@@ -85,6 +85,35 @@ Because these projections are derived, the surfaces cannot disagree with the
 contract or with each other. Change the annotation, regenerate, and every surface
 moves together.
 
+## Running a surface in local development
+
+In local development a devedge-sdk service runs the dev authorizer, which reads
+the caller's identity from request metadata — the `account-id`, `groups`, and
+`subject` headers — not from a bearer token. A generated CLI or Terraform
+provider sends a bearer token by default, so to complete a round-trip against a
+freshly scaffolded service you also pass that identity metadata.
+
+For the CLI, combine `--dev` (a static stub token) with a `--header` for each
+identity value:
+
+```bash
+ib --dev --header account-id=t1 --header groups=admin --server http://localhost:8080 zone list
+```
+
+For Terraform, set the provider's `headers` attribute:
+
+```hcl
+provider "zoned" {
+  endpoint = "http://localhost:8080"
+  headers  = { "account-id" = "t1", "groups" = "admin" }
+}
+```
+
+Both carry the metadata the dev authorizer reads; the dev authorizer ignores the
+bearer token. In production you replace the dev authorizer and its
+`PrincipalFunc` with a real policy and a verified-token principal, and drop the
+`--header` / `headers` values.
+
 ## Open core, private overlay
 
 The runtimes and generators are open source under
