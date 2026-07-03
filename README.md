@@ -28,6 +28,32 @@ composes with the others through the `de` CLI:
 drives apx — see [Full-stack: a service and a micro-frontend](#full-stack-a-service-and-a-micro-frontend)
 for the path end to end.
 
+## Use with Claude Code
+
+devedge ships a Claude Code **skills marketplace** —
+[`infobloxopen/devedge-claude-plugins`](https://github.com/infobloxopen/devedge-claude-plugins) —
+so you can drive the common operations from a prompt instead of memorizing commands. Add the
+marketplace once, then install the skills you want:
+
+```text
+/plugin marketplace add infobloxopen/devedge-claude-plugins
+/plugin install new-service@devedge      # or publish-api, run-locally, new-ufe, compose-services, model-domain
+```
+
+Each skill triggers on intent and drives its operation end to end using the real `de` / `apx`
+tooling and the published docs as ground truth:
+
+| Skill | Use it to |
+|---|---|
+| `new-service` | Bootstrap and build a microservice on devedge-sdk from a single prompt |
+| `model-domain` | Model the domain with DDD rigor — aggregate boundaries, references, read surfaces |
+| `publish-api` | Publish the service's OpenAPI v3 through apx and generate a typed client |
+| `run-locally` | Bring the service up on the local edge and round-trip it over its `*.dev.test` host |
+| `new-ufe` | Scaffold an Angular / single-spa micro-frontend and register it into a shell |
+| `compose-services` | Compose several service modules into one suite binary and deploy it |
+
+For the walkthrough, see [Use with Claude Code](https://infobloxopen.github.io/devedge-sdk/docs/getting-started/use-with-claude-code/).
+
 ## Install
 
 ```bash
