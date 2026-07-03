@@ -21,8 +21,8 @@ composes with the others through the `de` CLI:
 |---|---|---|
 | **devedge** (this repo) | The local dev edge router and name registry, and the `de` CLI that scaffolds, builds, routes, and deploys services and micro-frontends. | <https://infobloxopen.github.io/devedge/> |
 | [**devedge-sdk**](https://github.com/infobloxopen/devedge-sdk) | The runtime library a Go service imports: a gRPC + REST service from one proto, with fail-closed authorization, multi-tenant isolation, and persistence and eventing behind swappable seams. | <https://infobloxopen.github.io/devedge-sdk/> |
-| [**devedge-ufe-sdk**](https://github.com/infobloxopen/devedge-ufe-sdk) | The frontend counterpart: an Angular / single-spa micro-frontend SDK where the shell owns the session. | [repo README](https://github.com/infobloxopen/devedge-ufe-sdk) |
-| [**apx**](https://github.com/infobloxopen/apx) | The API schema lifecycle tool `de` drives to publish a service's OpenAPI v3 to a catalog and generate typed clients. | [repo README](https://github.com/infobloxopen/apx) |
+| [**devedge-ufe-sdk**](https://github.com/infobloxopen/devedge-ufe-sdk) | The frontend counterpart: an Angular / single-spa micro-frontend SDK where the shell owns the session. | <https://infobloxopen.github.io/devedge-ufe-sdk/> |
+| [**apx**](https://github.com/infobloxopen/apx) | The API schema lifecycle tool `de` drives to publish a service's OpenAPI v3 to a catalog and generate typed clients. | <https://apx.infoblox.dev/> |
 
 `de new service` builds on devedge-sdk, `de ufe new` builds on devedge-ufe-sdk, and `de api publish`
 drives apx — see [Full-stack: a service and a micro-frontend](#full-stack-a-service-and-a-micro-frontend)
