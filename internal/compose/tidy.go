@@ -125,13 +125,18 @@ func Tidy(c *config.Composition, r ModuleResolver, goVersion string) (TidyReport
 	return report, nil
 }
 
-// Format renders a TidyReport into a human-readable, multi-line summary.
+// Format renders a TidyReport into a human-readable, multi-line summary. It is
+// explicit about what was NOT checked: an unresolved (external, separately-repo'd)
+// member contributes no descriptor to the in-process union, so neither its
+// descriptor conflicts nor its version compatibility are validated here (Run 18
+// finding 080). The summary never reads as a full pass while members went
+// unchecked.
 func (r TidyReport) Format(comp string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "composition %q: %d module(s) resolved, %d unresolved\n",
 		comp, len(r.Resolved), len(r.Unresolved))
 	for _, u := range r.Unresolved {
-		fmt.Fprintf(&b, "  unresolved: %s (cannot validate descriptors in-process)\n", u)
+		fmt.Fprintf(&b, "  unresolved: %s (external — descriptor + SDK-version compatibility NOT checked here)\n", u)
 	}
 	if r.Conflict != nil {
 		fmt.Fprintf(&b, "  conflict: %v\n", r.Conflict)
@@ -139,8 +144,17 @@ func (r TidyReport) Format(comp string) string {
 	for _, e := range r.Incompatible {
 		fmt.Fprintf(&b, "  incompatible: %v\n", e)
 	}
-	if r.OK() {
-		b.WriteString("OK: no conflicts, all resolved modules compatible\n")
+	if !r.OK() {
+		return b.String()
+	}
+	switch {
+	case len(r.Unresolved) > 0 && len(r.Resolved) == 0:
+		b.WriteString("no members verified: all are external — run `de compose build` and build the generated host to check compatibility\n")
+	case len(r.Unresolved) > 0:
+		fmt.Fprintf(&b, "OK for the %d resolved member(s); %d external member(s) NOT checked (build the generated host)\n",
+			len(r.Resolved), len(r.Unresolved))
+	default:
+		b.WriteString("OK: no conflicts, all members resolved + compatible\n")
 	}
 	return b.String()
 }

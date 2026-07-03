@@ -10,10 +10,11 @@ title: de compose
 Compose several service modules into ONE host process.
 
 A 'kind: Composition' file lists member modules (each an importable package
-exposing a zero-arg Module() constructor). 'de compose build' generates a
-cmd/<name>/main.go that imports those modules and runs them via
-servicekit.Run — static composition, no Go plugins. The same modules run
-standalone or composed by changing the host, not the module.
+exposing the NewModule(db)/Models() seam a devedge-sdk scaffold generates).
+'de compose build' generates a cmd/<name>/main.go that opens ONE shared database,
+builds each member over it via NewModule(db), and runs them via servicekit.Run —
+static composition, no Go plugins. The same module runs standalone or composed by
+changing the host, not the module.
 
 Usage:
   de compose [command]
@@ -37,7 +38,18 @@ Use "de compose [command] --help" for more information about a command.
 ### `de compose add`
 
 ```text
-Add a member module to the composition
+Add a member module to the composition.
+
+Published member (pin a version):
+  de compose add github.com/acme/orders/module@v0.4.1
+
+Local, not-yet-published member (a two-repo dev loop):
+  de compose add github.com/acme/orders/module --path ../orders
+
+--path points at the member's Go module ROOT (the dir with its go.mod). At
+'de compose build' the generated go.mod gets a 'replace' to that checkout, so the
+composition builds before the member is published, and the composed binary's
+devedge-sdk pin is derived from the member's own go.mod.
 
 Usage:
   de compose add MODULE[@VERSION] [flags]
@@ -47,6 +59,7 @@ Flags:
   -f, --file string            composition config file (default "composition.yaml")
   -h, --help                   help for add
       --name string            member name (defaults to the import path's last segment)
+      --path string            local checkout dir of an unpublished member (writes a go.mod replace at build)
       --schema string          DB schema for this module (defaults to name)
 ```
 

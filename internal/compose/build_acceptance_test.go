@@ -28,14 +28,15 @@ func repoRoot(t *testing.T) string {
 
 // TestBuild_ComposedBinaryCompiles is the WS-012 P4 SC-001 acceptance: a real
 // `kind: Composition` with TWO real modules (the greetermod + echomod fixtures,
-// each exposing a zero-arg Module()) -> compose.Generate produces a
+// each exposing the NewModule(db)/Models() seam) -> compose.Generate produces a
 // cmd/<name>/main.go + go.mod + composition.lock that COMPILE into a single
 // composed binary.
 //
 // The generated go.mod is replaced with one wired to the local devedge checkout
-// (so the fixture import paths resolve) + the cached devedge-sdk v0.28.0; the
-// generated main.go + lock are used verbatim. This proves the static-composition
-// generator emits a buildable composed host (no Go plugins).
+// (so the fixture import paths resolve); `go mod tidy` fills the composed host's
+// gorm/sqlite/gormtx deps. The generated main.go + lock are used verbatim. This
+// proves the static-composition generator emits a buildable composed host that
+// calls the uniform NewModule(db) seam (Run 18 finding 079) — no Go plugins.
 func TestBuild_ComposedBinaryCompiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile acceptance in -short mode")
@@ -52,10 +53,10 @@ spec:
   database: { engine: postgres, isolation: schema-preferred }
   modules:
     - name: greeter
-      module: ` + greetermod.ImportPath + `
+      module: ` + greetermod.ImportPath + `@v0.0.0
       failurePolicy: fail-host
     - name: echo
-      module: ` + echomod.ImportPath + `
+      module: ` + echomod.ImportPath + `@v0.0.0
       failurePolicy: degraded
 `
 	c, err := config.ParseComposition([]byte(doc))
@@ -65,7 +66,7 @@ spec:
 
 	tmp := t.TempDir()
 	modulePath := "example.com/suite/cmd/suite"
-	gen, err := compose.Generate(c, "1.26.0", modulePath)
+	gen, err := compose.Generate(c, "1.26.0", modulePath, compose.GenerateOptions{})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}

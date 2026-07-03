@@ -36,6 +36,11 @@ type ModuleRef struct {
 	// Alias is the import alias the generated main.go uses to avoid collisions
 	// (derived from Name; always a valid, unique Go identifier).
 	Alias string
+	// Path is the local checkout directory a member was added with (`de compose
+	// add --path`), relative to the composition file (or absolute). Empty for a
+	// published member. When set, `de compose build` requires the member at a
+	// local pseudo-version behind a `replace` and derives the SDK pin from it.
+	Path string
 }
 
 // ParseModuleRef splits a "path@version" module reference into its path and
@@ -100,6 +105,7 @@ func ResolveModuleRefs(c *config.Composition) ([]ModuleRef, error) {
 			ImportPath: path,
 			Version:    version,
 			Alias:      aliasFor(m.Name, taken),
+			Path:       m.Path,
 		})
 	}
 	return refs, nil

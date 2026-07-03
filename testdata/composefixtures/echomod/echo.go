@@ -20,8 +20,18 @@ const (
 	methodEchoList = "/echo.v1.EchoService/ListEchoes"
 )
 
-// Module is the zero-arg constructor the generated composed main.go calls.
+// Module is the zero-arg constructor the in-process resolver (`de compose tidy` /
+// smoke) uses to link this fixture.
 func Module() servicekit.Module { return &echoModule{} }
+
+// NewModule is the uniform, resource-agnostic seam a generated composed host
+// (`de compose build`) calls across every member. This fixture holds no
+// repository, so it ignores the shared DB handle (a *gorm.DB is assignable to the
+// `any` parameter) and returns the same module.
+func NewModule(any) servicekit.Module { return Module() }
+
+// Models reports this fixture owns no domain models for the host's dev AutoMigrate.
+func Models() []any { return nil }
 
 type echoModule struct{}
 
