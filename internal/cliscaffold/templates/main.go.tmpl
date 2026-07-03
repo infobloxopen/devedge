@@ -1,0 +1,58 @@
+// Command {{.Name}} is a rebrandable devedge CLI shell. It composes generated
+// "domain command modules" over the open-core devedge-cli-sdk clikit runtime —
+// the CLI mirror of a devedge micro-frontend shell. The shell owns session
+// construction (binding the generic OIDC device-grant provider from the active
+// profile, or a --dev stub); generated domain modules consume only the
+// read-only clikit.Runtime.
+//
+// Add a domain with: de cli add --input <spec> --domain <name>
+// which generates gen/<name>/ with cligen and regenerates domains_gen.go.
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/infobloxopen/devedge-cli-sdk/clikit"
+	"github.com/infobloxopen/devedge-cli-sdk/clikit/auth"
+	"github.com/infobloxopen/devedge-cli-sdk/clikit/auth/oidc"
+)
+
+// appName is the rebranded application name: the clikit App name, config dir,
+// and env-var prefix all derive from it.
+const appName = "{{.AppName}}"
+
+// newApp builds the {{.Name}} shell. It is shared by main and any e2e test.
+func newApp() *clikit.App {
+	app := clikit.NewApp(appName)
+
+	// The shell owns session construction. It binds the generic OIDC
+	// device-grant provider from the active profile; --dev bypasses this with a
+	// static stub token. A private preset overlay would supply concrete
+	// issuer/client values without changing this seam.
+	app.SetSessionFactory(func(p clikit.Profile) (auth.Session, error) {
+		if p.Auth.OIDC.ClientID == "" && p.Auth.OIDC.Issuer == "" {
+			return nil, fmt.Errorf("profile %q has no oidc config; use --dev for local development", p.Name)
+		}
+		return oidc.New(oidc.Config{
+			Issuer:   p.Auth.OIDC.Issuer,
+			ClientID: p.Auth.OIDC.ClientID,
+			Scopes:   p.Auth.OIDC.Scopes,
+			Audience: p.Auth.OIDC.Audience,
+			Store:    &auth.FileStore{Path: filepath.Join(clikit.ConfigDir(appName), "token.json")},
+		}), nil
+	})
+
+	root := app.Root()
+	registerDomains(root, app.Runtime())
+	root.AddCommand(clikit.NewDoctorCommand(appName))
+	return app
+}
+
+func main() {
+	if err := newApp().Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
