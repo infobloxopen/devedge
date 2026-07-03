@@ -1,0 +1,10 @@
+# goreleaser output
+/dist/
+
+# local build of the provider binary
+/{{.RepoName}}
+
+# terraform plugin cache / local state used while developing
+.terraform/
+*.tfstate
+*.tfstate.*

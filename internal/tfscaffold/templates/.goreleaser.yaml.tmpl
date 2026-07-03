@@ -1,0 +1,77 @@
+# GoReleaser configuration for the {{.RepoName}} Terraform provider.
+#
+# This follows the HashiCorp terraform-provider-scaffolding-framework shape so
+# the release artifacts are accepted by the Terraform Registry: zip archives, a
+# version-suffixed binary, GPG-detached-signed SHA256SUMS, and the registry
+# manifest published alongside the checksums. GPG signing runs in CI on tag
+# (see .github/workflows/release.yml); no signing credentials are needed to
+# `goreleaser build --snapshot --clean` locally.
+#
+# The '{{"{{"}} ... {{"}}"}}' expressions below are GoReleaser templates, evaluated
+# by GoReleaser at release time — not by the de scaffold.
+version: 2
+
+project_name: {{.RepoName}}
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      # GoReleaser does not run with CGO; distribute a static binary.
+      - CGO_ENABLED=0
+    mod_timestamp: '{{"{{ .CommitTimestamp }}"}}'
+    flags:
+      - -trimpath
+    ldflags:
+      - '-s -w -X main.version={{"{{.Version}}"}} -X main.commit={{"{{.Commit}}"}}'
+    goos:
+      - freebsd
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - '386'
+      - arm
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: '386'
+    # The Registry expects the binary named terraform-provider-{NAME}_vX.Y.Z.
+    binary: '{{"{{ .ProjectName }}_v{{ .Version }}"}}'
+
+archives:
+  - formats:
+      - zip
+    name_template: '{{"{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"}}'
+
+checksum:
+  # The Registry reads the manifest and the SHA256SUMS from the release.
+  extra_files:
+    - glob: 'terraform-registry-manifest.json'
+      name_template: '{{"{{ .ProjectName }}_{{ .Version }}_manifest.json"}}'
+  name_template: '{{"{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"}}'
+  algorithm: sha256
+
+signs:
+  - artifacts: checksum
+    args:
+      # In CI this is non-interactive; the fingerprint comes from the imported
+      # GPG key (see .github/workflows/release.yml).
+      - '--batch'
+      - '--local-user'
+      - '{{"{{ .Env.GPG_FINGERPRINT }}"}}'
+      - '--output'
+      - '${signature}'
+      - '--detach-sign'
+      - '${artifact}'
+
+release:
+  extra_files:
+    - glob: 'terraform-registry-manifest.json'
+      name_template: '{{"{{ .ProjectName }}_{{ .Version }}_manifest.json"}}'
+
+changelog:
+  disable: true

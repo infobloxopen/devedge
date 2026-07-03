@@ -1,0 +1,32 @@
+// Package provider composes the tfkit provider base with the tfgen-generated
+// resource registration (resources_gen.go).
+//
+// This file is hand-written — it is the small, stable seam the scaffolded
+// provider owns. "de terraform add" (tfgen) never overwrites it; it only writes
+// the generated resource modules and resources_gen.go alongside it.
+package provider
+
+import (
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+
+	"github.com/infobloxopen/devedge-terraform-sdk/tfkit"
+)
+
+// New returns the {{.Name}} provider factory for providerserver.Serve. It builds
+// on the reusable tfkit base — endpoint/token configuration and the shared
+// client — and registers the generated resources. Endpoint and token may be set
+// in the provider configuration block or via the {{.EnvPrefix}}_ENDPOINT and
+// {{.EnvPrefix}}_TOKEN environment variables.
+//
+// A private preset overlay (applied at scaffold time with --preset-dir) can
+// replace this file to bind a product-specific auth flow without changing the
+// generated code around it.
+func New(version string) func() provider.Provider {
+	return func() provider.Provider {
+		return tfkit.NewProvider(tfkit.ProviderConfig{
+			TypeName:  "{{.Name}}",
+			Version:   version,
+			Resources: Resources(),
+		})
+	}
+}
