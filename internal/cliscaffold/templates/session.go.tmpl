@@ -1,0 +1,32 @@
+package main
+
+import (
+	"fmt"
+	"path/filepath"
+
+	"github.com/infobloxopen/devedge-cli-sdk/clikit"
+	"github.com/infobloxopen/devedge-cli-sdk/clikit/auth"
+	"github.com/infobloxopen/devedge-cli-sdk/clikit/auth/oidc"
+)
+
+// newSessionFactory returns the clikit.SessionFactory this shell binds. It is
+// the single overridable auth seam — the CLI analog of a devedge micro-frontend
+// shell's bootstrap-session module. The base scaffold ships a generic OIDC
+// device-grant binding (provider-agnostic; --dev bypasses it with a static
+// stub). A private preset (de cli new --preset-dir) overrides this whole file
+// to bind a concrete identity provider (e.g. Infoblox Okta) without touching
+// main.go or forking the open-core clikit runtime.
+func newSessionFactory() clikit.SessionFactory {
+	return func(p clikit.Profile) (auth.Session, error) {
+		if p.Auth.OIDC.ClientID == "" && p.Auth.OIDC.Issuer == "" {
+			return nil, fmt.Errorf("profile %q has no oidc config; use --dev for local development", p.Name)
+		}
+		return oidc.New(oidc.Config{
+			Issuer:   p.Auth.OIDC.Issuer,
+			ClientID: p.Auth.OIDC.ClientID,
+			Scopes:   p.Auth.OIDC.Scopes,
+			Audience: p.Auth.OIDC.Audience,
+			Store:    &auth.FileStore{Path: filepath.Join(clikit.ConfigDir(appName), "token.json")},
+		}), nil
+	}
+}

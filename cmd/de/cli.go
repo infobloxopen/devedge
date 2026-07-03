@@ -61,7 +61,7 @@ Examples:
   de cli new ib
   de cli new ib --module github.com/acme/ib
   de cli new ib --dir ./clis
-  de cli new ib --preset-dir ../devedge-cli-sdk-internal/preset/acme`,
+  de cli new ib --preset-dir ../devedge-cli-sdk-internal/preset/infoblox-cli`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
