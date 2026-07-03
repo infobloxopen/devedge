@@ -194,6 +194,13 @@ spec:
 	if u, n := findUFE(s, "tags"); n != 1 || u.Route != "tags" || u.Upstream != "http://127.0.0.1:4202" {
 		t.Errorf("new tags entry wrong: %+v (n=%d)", u, n)
 	}
+	// --dev-port must also reach the scaffolded angular.json listener, not just
+	// the roster upstream (finding 088): the two must agree or the route is dead.
+	if ng, rerr := os.ReadFile(filepath.Join(dir, "tags", "angular.json")); rerr != nil {
+		t.Errorf("read scaffolded angular.json: %v", rerr)
+	} else if !strings.Contains(string(ng), `"port": 4202`) {
+		t.Errorf("angular.json serve port did not follow --dev-port 4202:\n%s", ng)
+	}
 
 	// Re-run for the SAME id "tags" with different route/port → updated in place,
 	// no duplicate. (Scaffold into a fresh dir so Render does not hit a non-empty

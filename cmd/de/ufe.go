@@ -18,9 +18,10 @@ const (
 	// roster when --shell is omitted.
 	defaultShellFile = "shell.yaml"
 	// defaultUFEDevPort is the uFE dev-server port used for its shell-roster
-	// upstream when --dev-port is omitted. It matches the scaffold's own base
-	// dev-server port so the generated uFE is routable without extra flags.
-	defaultUFEDevPort = 4201
+	// upstream when --dev-port is omitted. It is the same source of truth the
+	// scaffold uses for the generated angular.json serve port, so the roster
+	// upstream and the real dev-server listener always agree.
+	defaultUFEDevPort = ufescaffold.DefaultDevPort
 	// defaultShellUpstream is the shell root-config dev server the create-default
 	// shell points at (the standard Angular shell dev port).
 	defaultShellUpstream = "http://127.0.0.1:4200"
@@ -105,6 +106,7 @@ Examples:
 				ParentDir: dir,
 				Preset:    preset,
 				PresetDir: presetDir,
+				DevPort:   devPort,
 			}
 			if err := ufescaffold.Render(p); err != nil {
 				return err
@@ -145,7 +147,7 @@ Examples:
 			fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Next steps:"))
 			fmt.Fprintf(out, "  cd %s\n", root)
 			fmt.Fprintf(out, "  pnpm install              %s\n", colorLabel.Sprint("# link local SDK packages until published (see README)"))
-			fmt.Fprintf(out, "  pnpm start                %s\n", colorLabel.Sprint("# ng serve on https://localhost:4200"))
+			fmt.Fprintf(out, "  pnpm start                %s\n", colorLabel.Sprintf("# ng serve on http://localhost:%d", devPort))
 			fmt.Fprintf(out, "  pnpm run doctor           %s\n", colorLabel.Sprint("# loud dev-loop checklist (cert/CORS/manifest/nav)"))
 			if shellFile != "" {
 				fmt.Fprintf(out, "  de project up -f %s   %s\n", shellFile, colorLabel.Sprint("# route the shell + this uFE through the edge"))

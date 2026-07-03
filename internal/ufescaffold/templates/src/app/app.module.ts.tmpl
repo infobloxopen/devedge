@@ -1,9 +1,14 @@
 /**
  * Root Angular module for the {{ .TitleName }} uFE.
  *
- * HttpClient is provided WITH the open-core functional bearerAuthInterceptor,
- * so every API call carries `Authorization: Bearer <token>` from the injected
- * SessionProvider without any per-app auth wiring.
+ * HttpClient is provided WITH two open-core functional interceptors, in order:
+ *   1. devAuthInterceptor — stamps dev-only account-id/groups identity headers
+ *      (from environment.devAuthHeaders) so a generated client round-trips
+ *      against the devedge-sdk dev authorizer in local development. It is a
+ *      no-op in production, where devAuthHeaders is empty.
+ *   2. bearerAuthInterceptor — carries `Authorization: Bearer <token>` from the
+ *      injected SessionProvider, the real production credential.
+ * Neither needs per-app auth wiring.
  */
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
@@ -12,16 +17,24 @@ import {
   withInterceptors,
 } from '@angular/common/http';
 
-import { bearerAuthInterceptor } from '@infobloxopen/devedge-ufe-angular';
+import {
+  bearerAuthInterceptor,
+  devAuthInterceptor,
+  provideDevAuthHeaders,
+} from '@infobloxopen/devedge-ufe-angular';
 
 import { AppComponent } from './app.component';
 import { AppRoutingModule } from './app-routing.module';
 import { HomeComponent } from './home.component';
+import { environment } from '../environments/environment';
 
 @NgModule({
   declarations: [AppComponent, HomeComponent],
   imports: [BrowserModule, AppRoutingModule],
-  providers: [provideHttpClient(withInterceptors([bearerAuthInterceptor]))],
+  providers: [
+    provideHttpClient(withInterceptors([devAuthInterceptor, bearerAuthInterceptor])),
+    provideDevAuthHeaders(environment.devAuthHeaders),
+  ],
   bootstrap: [AppComponent],
 })
 export class AppModule {}
