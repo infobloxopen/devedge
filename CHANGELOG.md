@@ -8,6 +8,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+#### Reliability targets — `de slo` (WS-025)
+
+- **`de slo` command group** turns a service's API contract into reliability
+  artifacts by orchestrating the devedge-sdk `slo` seam (imported directly as a
+  pure-Go library transform; bumps `devedge-sdk` to v0.50.0).
+  - `de slo generate` — derive GOOD default OpenSLO SLOs from the enriched
+    `openapi/<svc>.openapi.yaml` and write `slo.yaml`. It **derives the gRPC
+    service FQN** (proto package + service name) from the project's `.proto`
+    files and passes it as the `rpc.service` label, so the SLIs are
+    service-scoped. The OpenAPI does not carry the FQN; without it the SLIs would
+    silently aggregate across services, so generation **fails loud** when a single
+    service cannot be determined (`--service` overrides). `--openapi`/`--out`
+    mirror `slogen`. `make slo` runs this with no args.
+  - `de slo lint [files...]` — run the fail-loud three-layer classifier
+    (`--format text|json`; non-zero exit on any error finding); defaults to
+    `slo.yaml`.
+  - `de slo render --target prometheus|grafana|loki --in slo.yaml --out <dir>` —
+    project to monitoring artifacts. `--preset-dir` passes through to the emitter
+    overlay seam (how the internal Grafana-Operator overlay in
+    `Infoblox-CTO/devedge-sdk-internal/slo/preset` is consumed).
+  - `de slo check [--prometheus-url <url>] [--in slo.yaml]` — query a
+    Prometheus/Cortex API (`/api/v1/query`) for each SLO's current SLI and
+    error-budget consumption over its window, to calibrate the un-calibrated
+    defaults. URL from the flag, `$PROMETHEUS_URL`/`$CORTEX_URL`, or
+    `spec.monitoring.prometheusUrl` in `devedge.yaml`.
+  - `de slo kpis` — print the Layer-0 API KPI reference (golden signals + RED +
+    USE, OTel semconv terms).
+- **Docs**: how-to guide *Define and ship SLOs* and the generated `de slo` CLI
+  reference page.
+
 ### Changed
 
 ### Fixed
