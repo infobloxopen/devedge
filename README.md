@@ -6,6 +6,28 @@ Devedge gives every project stable HTTPS hostnames on one shared 80/443 entry
 point, and lets host apps, containers, and k3d clusters register routes
 dynamically.
 
+## Documentation
+
+**Full documentation: <https://infobloxopen.github.io/devedge/>.** This README is a quick tour; the
+site has the getting-started guide, the `de` CLI reference, the concepts, and the end-to-end
+full-stack walkthrough.
+
+## The devedge ecosystem
+
+devedge is the dev- and deploy-time edge of a small ecosystem. Each piece is usable on its own and
+composes with the others through the `de` CLI:
+
+| Project | Role | Docs |
+|---|---|---|
+| **devedge** (this repo) | The local dev edge router and name registry, and the `de` CLI that scaffolds, builds, routes, and deploys services and micro-frontends. | <https://infobloxopen.github.io/devedge/> |
+| [**devedge-sdk**](https://github.com/infobloxopen/devedge-sdk) | The runtime library a Go service imports: a gRPC + REST service from one proto, with fail-closed authorization, multi-tenant isolation, and persistence and eventing behind swappable seams. | <https://infobloxopen.github.io/devedge-sdk/> |
+| [**devedge-ufe-sdk**](https://github.com/infobloxopen/devedge-ufe-sdk) | The frontend counterpart: an Angular / single-spa micro-frontend SDK where the shell owns the session. | [repo README](https://github.com/infobloxopen/devedge-ufe-sdk) |
+| [**apx**](https://github.com/infobloxopen/apx) | The API schema lifecycle tool `de` drives to publish a service's OpenAPI v3 to a catalog and generate typed clients. | [repo README](https://github.com/infobloxopen/apx) |
+
+`de new service` builds on devedge-sdk, `de ufe new` builds on devedge-ufe-sdk, and `de api publish`
+drives apx — see [Full-stack: a service and a micro-frontend](#full-stack-a-service-and-a-micro-frontend)
+for the path end to end.
+
 ## Install
 
 ```bash
