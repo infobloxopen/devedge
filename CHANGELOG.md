@@ -42,6 +42,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+## [0.13.0] - 2026-07-03
+
+Fixes from the DX hardening cadence (Runs 16–19). Requires devedge-sdk v0.52.0.
+
+### Fixed
+
+- **`de compose build` generated a host that never compiled** — it called each member's `Module()`
+  with zero args, but a scaffolded module's constructor takes `(repo, sqlDB)`. The generated host now
+  builds each member over the devedge-sdk `NewModule(db)/Models()` seam (one shared DB, host-owned
+  migrate), and `de compose add --path <dir>` composes a local unpublished module. (#46, #47)
+- **`de compose test` false-passed** non-vendored members (exit 0 while the real binary did not
+  build) — now exits non-zero. (#49)
+- **`de compose` version handling** — the composed `go.mod` derives its devedge-sdk pin from the
+  members (was hardcoded v0.28.0) and no longer writes the literal token `latest`. (#48, #50)
+- **`de ufe new`'s first command failed** — the scaffolded `angular.json` serve target used
+  `buildTarget`, which the pinned Angular builder rejects; it now emits `browserTarget`. `--dev-port`
+  now reaches `angular.json`'s listener. (#52, #53)
+- **`de ls`** shows a PATH column so a shell's `/` catch-all and its `/api` route are
+  distinguishable. (#54)
+- uFE scaffold papercuts: doctor/README use HTTP (not HTTPS); the working `pnpm add <pkg>@link:`
+  recipe is primary; a dev-only auth interceptor is wired into the scaffold's dev environment. (#55)
+
+### Added
+
+- `reference/cli/cli.md` and `reference/cli/terraform.md` reference pages, plus a local-dev
+  auth-bridge section in `explanation/consuming-a-service.md`. (#44)
+
+### Changed
+
+- Bumped `devedge-sdk` to v0.52.0 (which carries the `Create` tenant-isolation security fix).
+
 ## [0.4.0] - 2026-06-28
 
 ### Added

@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/fatih/color v1.18.0
-	github.com/infobloxopen/devedge-sdk v0.50.0
+	github.com/infobloxopen/devedge-sdk v0.52.0
 	github.com/lib/pq v1.10.9
 	github.com/miekg/dns v1.1.72
 	github.com/spf13/cobra v1.10.2
