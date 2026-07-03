@@ -1,0 +1,253 @@
+components:
+    schemas:
+        rpcStatus:
+            properties:
+                code:
+                    format: int32
+                    type: integer
+                details:
+                    items:
+                        type: object
+                    type: array
+                message:
+                    type: string
+            type: object
+        v1DeleteOrderResponse:
+            type: object
+        v1ListOrdersResponse:
+            properties:
+                nextPageToken:
+                    type: string
+                orders:
+                    items:
+                        $ref: '#/components/schemas/v1Order'
+                    type: array
+            type: object
+        v1Order:
+            description: Order is the resource managed by OrderService.
+            properties:
+                customerId:
+                    description: customer_id is client-REQUIRED (explicit field_behavior).
+                    type: string
+                    x-aip-field-behavior:
+                        - REQUIRED
+                id:
+                    description: |-
+                        id is server-assigned (AIP-133 OUTPUT_ONLY): the service mints it on
+                        create; clients never set it.
+                    readOnly: true
+                    type: string
+                    x-aip-field-behavior:
+                        - OUTPUT_ONLY
+                name:
+                    description: name is the AIP-122 resource name, e.g. "orders/abc123".
+                    readOnly: true
+                    type: string
+                    x-aip-field-behavior:
+                        - OUTPUT_ONLY
+                region:
+                    description: 'region is IMMUTABLE (explicit field_behavior): set at create, never updated.'
+                    type: string
+                    x-aip-field-behavior:
+                        - IMMUTABLE
+                status:
+                    description: status is a string-backed enum (allowed_values → OpenAPI enum, AC-4).
+                    enum:
+                        - pending
+                        - shipped
+                        - delivered
+                    type: string
+                total:
+                    format: int32
+                    type: integer
+            required:
+                - customerId
+            type: object
+            x-aip-resource:
+                key: id
+                pattern:
+                    - orders/{order}
+                type: shop.example.com/Order
+        v1UpdateOrderRequest:
+            properties:
+                order:
+                    $ref: '#/components/schemas/v1Order'
+                updateMask:
+                    items:
+                        type: string
+                    type: array
+            type: object
+info:
+    description: |-
+        Minimal enriched OpenAPI v3 fixture for a SECOND AIP domain (Order), used by
+        the multi-domain CLI/Terraform composition test. It carries the same
+        x-aip-* extensions cligen/tfgen consume: an x-aip-resource, x-aip-method on
+        each op, x-aip-pagination on List, and field_behavior exercising REQUIRED,
+        OUTPUT_ONLY, IMMUTABLE, and an enum.
+    title: orders.proto
+    version: version not set
+openapi: 3.0.3
+paths:
+    /v1/orders:
+        get:
+            operationId: OrderService_ListOrders
+            parameters:
+                - in: query
+                  name: pageSize
+                  schema:
+                    format: int32
+                    type: integer
+                - in: query
+                  name: pageToken
+                  schema:
+                    type: string
+                - description: 'AIP-157: fields to return; empty means all fields.'
+                  in: query
+                  name: readMask
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/v1ListOrdersResponse'
+                    description: A successful response.
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/rpcStatus'
+                    description: An unexpected error response.
+            tags:
+                - OrderService
+            x-aip-method: List
+            x-aip-pagination:
+                nextPageTokenField: nextPageToken
+                pageSizeParam: pageSize
+                pageTokenParam: pageToken
+        post:
+            operationId: OrderService_CreateOrder
+            parameters:
+                - description: 'AIP-155: idempotency key; empty = no dedup.'
+                  in: query
+                  name: requestId
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/v1Order'
+                required: true
+                x-originalParamName: order
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/v1Order'
+                    description: A successful response.
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/rpcStatus'
+                    description: An unexpected error response.
+            tags:
+                - OrderService
+            x-aip-method: Create
+    /v1/orders/{id}:
+        delete:
+            operationId: OrderService_DeleteOrder
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/v1DeleteOrderResponse'
+                    description: A successful response.
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/rpcStatus'
+                    description: An unexpected error response.
+            tags:
+                - OrderService
+            x-aip-method: Delete
+        get:
+            operationId: OrderService_GetOrder
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+                - description: 'AIP-157: fields to return; empty means all fields.'
+                  in: query
+                  name: readMask
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/v1Order'
+                    description: A successful response.
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/rpcStatus'
+                    description: An unexpected error response.
+            tags:
+                - OrderService
+            x-aip-method: Get
+    /v1/orders/{order.id}:
+        patch:
+            operationId: OrderService_UpdateOrder
+            parameters:
+                - in: path
+                  name: order.id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: updateMask
+                  schema:
+                    items:
+                        type: string
+                    type: array
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/v1Order'
+                required: true
+                x-originalParamName: order
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/v1Order'
+                    description: A successful response.
+                default:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/rpcStatus'
+                    description: An unexpected error response.
+            tags:
+                - OrderService
+            x-aip-method: Update
+tags:
+    - name: OrderService
