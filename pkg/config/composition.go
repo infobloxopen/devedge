@@ -82,6 +82,12 @@ type ModuleEntry struct {
 	// with "@<version>" (e.g. "github.com/acme/orders/module@v0.4.1"). The
 	// version pins the member in composition.lock.
 	Module string `yaml:"module"`
+	// Path is a LOCAL checkout directory for an unpublished member (added with
+	// `de compose add --path <dir>`), relative to this composition file or
+	// absolute. When set, `de compose build` writes a go.mod `replace` to it so a
+	// two-repo composition builds before either member is published, and derives
+	// the composed SDK pin from the member's own go.mod. Empty = published member.
+	Path string `yaml:"path,omitempty"`
 	// ConfigPrefix is the module's config namespace (proposal §5.6). Defaults to
 	// Name when empty.
 	ConfigPrefix string `yaml:"configPrefix,omitempty"`

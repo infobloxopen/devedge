@@ -26,10 +26,11 @@ func composeCmd() *cobra.Command {
 		Long: `Compose several service modules into ONE host process.
 
 A 'kind: Composition' file lists member modules (each an importable package
-exposing a zero-arg Module() constructor). 'de compose build' generates a
-cmd/<name>/main.go that imports those modules and runs them via
-servicekit.Run — static composition, no Go plugins. The same modules run
-standalone or composed by changing the host, not the module.`,
+exposing the NewModule(db)/Models() seam a devedge-sdk scaffold generates).
+'de compose build' generates a cmd/<name>/main.go that opens ONE shared database,
+builds each member over it via NewModule(db), and runs them via servicekit.Run —
+static composition, no Go plugins. The same module runs standalone or composed by
+changing the host, not the module.`,
 	}
 	cmd.AddCommand(
 		composeInitCmd(),
@@ -114,30 +115,48 @@ func composeInitCmd() *cobra.Command {
 
 // composeAddCmd adds a member module to a composition.
 func composeAddCmd() *cobra.Command {
-	var file, name, configPrefix, schema string
+	var file, name, configPrefix, schema, localPath string
 	cmd := &cobra.Command{
 		Use:   "add MODULE[@VERSION]",
 		Short: "Add a member module to the composition",
-		Args:  cobra.ExactArgs(1),
+		Long: `Add a member module to the composition.
+
+Published member (pin a version):
+  de compose add github.com/acme/orders/module@v0.4.1
+
+Local, not-yet-published member (a two-repo dev loop):
+  de compose add github.com/acme/orders/module --path ../orders
+
+--path points at the member's Go module ROOT (the dir with its go.mod). At
+'de compose build' the generated go.mod gets a 'replace' to that checkout, so the
+composition builds before the member is published, and the composed binary's
+devedge-sdk pin is derived from the member's own go.mod.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			comp, err := loadCompositionForEdit(file)
 			if err != nil {
 				return err
 			}
 			ref := args[0]
-			path, _, err := compose.ParseModuleRef(ref)
+			importPath, version, err := compose.ParseModuleRef(ref)
 			if err != nil {
 				return err
 			}
+			if localPath != "" && version != "" {
+				return fmt.Errorf("pass either MODULE@VERSION or --path, not both (a local checkout is resolved by a replace, not a version)")
+			}
 			if name == "" {
-				name = lastPathSegment(path)
+				name = lastPathSegment(importPath)
 			}
 			for _, m := range comp.Spec.Modules {
 				if m.Name == name {
 					return fmt.Errorf("module name %q is already a member", name)
 				}
 			}
-			entry := config.ModuleEntry{Name: name, Module: ref, ConfigPrefix: configPrefix}
+			// Store the import path (no @version) as the module ref; --path/version
+			// are recorded on their own fields so the file stays a valid go-importable
+			// path plus an explicit local/published resolution.
+			entry := config.ModuleEntry{Name: name, Module: ref, ConfigPrefix: configPrefix, Path: localPath}
 			if schema != "" {
 				entry.Database = &config.ModuleDatabase{Schema: schema}
 			}
@@ -145,7 +164,11 @@ func composeAddCmd() *cobra.Command {
 			if err := writeComposition(file, comp); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s %s\n", colorSuccess.Sprint("added"), colorHost.Sprint(name), colorLabel.Sprint("->"), ref)
+			how := ref
+			if localPath != "" {
+				how = importPath + " (--path " + localPath + ")"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s %s\n", colorSuccess.Sprint("added"), colorHost.Sprint(name), colorLabel.Sprint("->"), how)
 			return nil
 		},
 	}
@@ -153,6 +176,7 @@ func composeAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "member name (defaults to the import path's last segment)")
 	cmd.Flags().StringVar(&configPrefix, "config-prefix", "", "config namespace prefix (defaults to name)")
 	cmd.Flags().StringVar(&schema, "schema", "", "DB schema for this module (defaults to name)")
+	cmd.Flags().StringVar(&localPath, "path", "", "local checkout dir of an unpublished member (writes a go.mod replace at build)")
 	return cmd
 }
 
@@ -245,13 +269,16 @@ SDK + toolchain. No Go plugins — the modules are imported, not loaded.`,
 			if mp == "" {
 				mp = "example.com/" + comp.Project() + "/cmd/" + comp.Project()
 			}
-			gen, err := compose.Generate(comp, goRuntimeVersion(), mp)
-			if err != nil {
-				return err
-			}
 			base := outDir
 			if base == "" {
 				base = filepath.Dir(file)
+			}
+			gen, err := compose.Generate(comp, goRuntimeVersion(), mp, compose.GenerateOptions{
+				CompositionDir: filepath.Dir(file),
+				OutBaseDir:     base,
+			})
+			if err != nil {
+				return err
 			}
 			dir := filepath.Join(base, gen.Dir)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -268,7 +295,7 @@ SDK + toolchain. No Go plugins — the modules are imported, not loaded.`,
 				}
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "%s %s\n", colorSuccess.Sprint("generated composed host"), colorHost.Sprint(comp.Project()))
+			fmt.Fprintf(out, "%s %s (devedge-sdk %s)\n", colorSuccess.Sprint("generated composed host"), colorHost.Sprint(comp.Project()), gen.SDK)
 			for fn := range files {
 				fmt.Fprintf(out, "  %s %s\n", colorLabel.Sprint("wrote"), filepath.Join(dir, fn))
 			}
@@ -311,8 +338,8 @@ when the modules declare migrations and a shared database is configured.`,
 				return err
 			}
 			for _, u := range res.Unresolved {
-				fmt.Fprintf(out, "%s %s (not linked into de; smoke it from cmd/%s via `de compose build`)\n",
-					colorLabel.Sprint("skipped:"), u, comp.Project())
+				fmt.Fprintf(out, "%s %s (not linked into de — this smoke did NOT build or boot it)\n",
+					colorLabel.Sprint("not verified:"), u)
 			}
 			if len(res.Resolved) > 0 {
 				fmt.Fprintf(out, "%s booted %d module(s) over the union completeness gate\n",
@@ -325,9 +352,20 @@ when the modules declare migrations and a shared database is configured.`,
 			if comp.Spec.Database != nil {
 				fmt.Fprintf(out, "%s shared database declared (%s); the REAL-DB migration path runs from the generated cmd/%s smoke test (Docker required) — NOT from this in-process smoke\n",
 					colorLabel.Sprint("note:"), comp.Spec.Database.Engine, comp.Project())
-			} else {
-				fmt.Fprintf(out, "%s no shared database declared; the real-DB path is N/A (in-process smoke only, no Docker)\n", colorLabel.Sprint("note:"))
 			}
+
+			// Fail loud: an external (separately-repo'd) member is NOT linked into
+			// `de`, so this in-process smoke cannot compile or boot it — reporting a
+			// pass here would green-wash a composition whose real binary may not
+			// build (Run 18 finding 081). The only real gate for external members is
+			// building + booting the generated host, so send the developer there.
+			if len(res.Unresolved) > 0 {
+				return fmt.Errorf("%d member(s) could not be verified in-process; build + boot the composed host to verify them: `de compose build && (cd cmd/%s && go mod tidy && go build && go vet ./...)`", len(res.Unresolved), comp.Project())
+			}
+			if len(res.Resolved) == 0 {
+				return fmt.Errorf("composition %q has no verifiable members", comp.Project())
+			}
+			fmt.Fprintf(out, "%s composition %q verified in-process\n", colorSuccess.Sprint("ok:"), comp.Project())
 			return nil
 		},
 	}

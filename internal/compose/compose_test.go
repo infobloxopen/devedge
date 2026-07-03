@@ -1,6 +1,8 @@
 package compose
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -84,7 +86,7 @@ spec:
 
 func TestGenerate_MainGoShape(t *testing.T) {
 	c := mustComposition(t, twoModuleDoc)
-	gen, err := Generate(c, "1.26.0", "example.com/control-plane/cmd/control-plane")
+	gen, err := Generate(c, "1.26.0", "example.com/control-plane/cmd/control-plane", GenerateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,11 +98,18 @@ func TestGenerate_MainGoShape(t *testing.T) {
 		"github.com/acme/billing/module",
 		"servicekit.Run(hc)",
 		"servicekit.HostConfig{",
-		".Module(),",
-		`GRPCAddr: ":9090"`,
-		`HTTPAddr: ":8080"`,
+		// WS-012 finding 079: the composed host builds each member over one shared
+		// DB via NewModule(db) — NOT a zero-arg Module().
+		".NewModule(db),",
+		".Models()...)",
+		"gorm.Open(sqlite.Open(dsn)",
+		"gormtx.MigrateModule(",
+		`GRPCAddr:`,
+		`":9090"`,
+		`HTTPAddr:`,
+		`":8080"`,
 		"servicekit.DatabaseConfig{",
-		`Engine: "postgres"`,
+		`"postgres"`,
 		`servicekit.IsolationPolicy("schema-preferred")`,
 		"FailurePolicies: map[string]servicekit.FailurePolicy{",
 		`servicekit.FailurePolicy("fail-host")`,
@@ -109,6 +118,10 @@ func TestGenerate_MainGoShape(t *testing.T) {
 		if !strings.Contains(main, want) {
 			t.Errorf("generated main.go missing %q\n---\n%s", want, main)
 		}
+	}
+	// The regression this fixes: a bare zero-arg Module() constructor call.
+	if strings.Contains(main, ".Module(),") {
+		t.Errorf("generated main.go still calls the zero-arg Module() (finding 079):\n%s", main)
 	}
 	// Static composition: NO plugin loading.
 	if strings.Contains(main, "plugin.") || strings.Contains(main, "plugin/") {
@@ -121,14 +134,16 @@ func TestGenerate_MainGoShape(t *testing.T) {
 
 func TestGenerate_GoModShape(t *testing.T) {
 	c := mustComposition(t, twoModuleDoc)
-	gen, err := Generate(c, "1.26.0", "example.com/control-plane/cmd/control-plane")
+	gen, err := Generate(c, "1.26.0", "example.com/control-plane/cmd/control-plane", GenerateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"module example.com/control-plane/cmd/control-plane",
 		"go 1.26.0",
-		"github.com/infobloxopen/devedge-sdk " + SDKVersion,
+		// No local --path here, so the SDK pin falls back to the default.
+		"github.com/infobloxopen/devedge-sdk " + DefaultSDKVersion,
+		gormtxModule + " " + DefaultSDKVersion,
 		"github.com/acme/orders/module v0.4.1",
 		"github.com/acme/billing/module v0.7.0",
 	} {
@@ -140,14 +155,14 @@ func TestGenerate_GoModShape(t *testing.T) {
 
 func TestGenerate_LockShape(t *testing.T) {
 	c := mustComposition(t, twoModuleDoc)
-	gen, err := Generate(c, "1.26.0", "example.com/x")
+	gen, err := Generate(c, "1.26.0", "example.com/x", GenerateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"lockVersion: " + LockVersion,
 		"composition: control-plane",
-		"sdk: " + SDKVersion,
+		"sdk: " + DefaultSDKVersion,
 		"go: 1.26.0",
 		"name: orders",
 		"module: github.com/acme/orders/module",
@@ -160,7 +175,10 @@ func TestGenerate_LockShape(t *testing.T) {
 	}
 }
 
-func TestGenerate_UnpinnedModuleRequiresLatest(t *testing.T) {
+// TestGenerate_UnpinnedPublishedModuleErrors: a published member with no version
+// and no --path has nothing to build against — `de compose build` must fail loud
+// rather than write the invalid token `latest` into go.mod (finding 083).
+func TestGenerate_UnpinnedPublishedModuleErrors(t *testing.T) {
 	doc := `apiVersion: devedge.infoblox.dev/v1alpha1
 kind: Composition
 metadata: { name: x }
@@ -169,11 +187,59 @@ spec:
     - { name: a, module: github.com/acme/a }
 `
 	c := mustComposition(t, doc)
-	gen, err := Generate(c, "1.26.0", "example.com/x")
+	_, err := Generate(c, "1.26.0", "example.com/x", GenerateOptions{})
+	if err == nil {
+		t.Fatal("expected an error for an unpinned published member, got nil")
+	}
+	if !strings.Contains(err.Error(), "has no version") {
+		t.Errorf("error should explain the missing version, got: %v", err)
+	}
+}
+
+// TestGenerate_LocalPathReplaceAndDerivedSDK: a member added with --path is
+// required at the local pseudo-version behind a replace, and the composed SDK pin
+// is derived from the member's own go.mod (findings 080 + 082 + 083).
+func TestGenerate_LocalPathReplaceAndDerivedSDK(t *testing.T) {
+	compDir := t.TempDir()
+	memberDir := filepath.Join(compDir, "member")
+	if err := os.MkdirAll(memberDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	memberGoMod := "module github.com/acme/orders\n\ngo 1.26.0\n\nrequire github.com/infobloxopen/devedge-sdk v0.51.0\n"
+	if err := os.WriteFile(filepath.Join(memberDir, "go.mod"), []byte(memberGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc := `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Composition
+metadata: { name: suite }
+spec:
+  modules:
+    - { name: orders, module: github.com/acme/orders/module, path: member }
+`
+	c := mustComposition(t, doc)
+	gen, err := Generate(c, "1.26.0", "example.com/suite/cmd/suite", GenerateOptions{
+		CompositionDir: compDir,
+		OutBaseDir:     compDir,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(gen.GoMod, "github.com/acme/a latest") {
-		t.Errorf("unpinned module should require @latest:\n%s", gen.GoMod)
+	if gen.SDK != "v0.51.0" {
+		t.Errorf("derived SDK = %q, want v0.51.0 (from the member go.mod)", gen.SDK)
+	}
+	for _, want := range []string{
+		"github.com/infobloxopen/devedge-sdk v0.51.0",
+		// require uses the member's MODULE path (not the package import path) at the
+		// local pseudo-version, and a replace points at the checkout.
+		"github.com/acme/orders " + localReplaceVersion,
+		"replace (",
+		"github.com/acme/orders => ../../member",
+	} {
+		if !strings.Contains(gen.GoMod, want) {
+			t.Errorf("generated go.mod missing %q\n---\n%s", want, gen.GoMod)
+		}
+	}
+	if strings.Contains(gen.GoMod, "latest") {
+		t.Errorf("generated go.mod must not contain the invalid token `latest`:\n%s", gen.GoMod)
 	}
 }

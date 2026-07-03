@@ -22,8 +22,20 @@ const (
 	methodListHi   = "/greeter.v1.GreeterService/ListGreetings"
 )
 
-// Module is the zero-arg constructor the generated composed main.go calls.
+// Module is the zero-arg constructor the in-process resolver (`de compose tidy` /
+// smoke) uses to link this fixture.
 func Module() servicekit.Module { return &greeterModule{} }
+
+// NewModule is the uniform, resource-agnostic seam a generated composed host
+// (`de compose build`) calls across every member. A scaffolded persisting module
+// builds its repository from the shared *gorm.DB here; this fixture holds no
+// repository, so it ignores the handle (a *gorm.DB is assignable to the `any`
+// parameter) and returns the same module. Models reports it owns no AutoMigrate
+// models.
+func NewModule(any) servicekit.Module { return Module() }
+
+// Models reports this fixture owns no domain models for the host's dev AutoMigrate.
+func Models() []any { return nil }
 
 type greeterModule struct{}
 

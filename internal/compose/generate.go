@@ -2,16 +2,39 @@ package compose
 
 import (
 	"fmt"
+	"go/format"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 
 	"github.com/infobloxopen/devedge/pkg/config"
 )
 
-// SDKVersion is the devedge-sdk version the generated composed binary requires.
-// It is the version devedge itself is built against (WS-012 P4 consumes v0.28.0).
-// Keep it in sync with the require in devedge's go.mod when the SDK is bumped.
-const SDKVersion = "v0.28.0"
+// DefaultSDKVersion is the devedge-sdk version the generated composed binary
+// requires when it cannot be derived from a member module (the published case
+// with no local --path). It tracks the version `de` itself builds against; a real
+// composition SHOULD derive the pin from its members' go.mod (see Generate).
+const DefaultSDKVersion = "v0.50.0"
+
+// SDKVersion is the fallback devedge-sdk pin for the generated composed binary.
+// Kept for callers/tests; Generate now DERIVES the pin from the member modules'
+// own go.mod when they are available locally (`de compose add --path`), so a
+// composition of v0.51.0 members pins v0.51.0 rather than this default.
+const SDKVersion = DefaultSDKVersion
+
+// localReplaceVersion is the require-version Go uses for a module satisfied by a
+// local `replace` directive (the zero pseudo-version). `de compose add --path`
+// pins members here and adds the replace so `go mod tidy` resolves them from disk
+// instead of trying to fetch an unpublished path.
+const localReplaceVersion = "v0.0.0-00010101000000-000000000000"
+
+// gormtxModule is the separate SDK sub-module the generated host imports for its
+// host-run per-module migration (MigrateModule).
+const gormtxModule = "github.com/infobloxopen/devedge-sdk/persistence/gormtx"
 
 // GeneratedFiles is the output of Generate: the rendered, ready-to-write files
 // for a composed binary (paths are relative to the composition's project dir).
@@ -24,43 +47,203 @@ type GeneratedFiles struct {
 	Lock string
 	// Dir is the relative output directory ("cmd/<name>").
 	Dir string
+	// SDK is the devedge-sdk version the generated binary pins (derived from the
+	// members when available, else DefaultSDKVersion).
+	SDK string
 }
 
-// Generate renders the composed-binary sources for a composition. It is pure (no
-// I/O) so it is trivially testable; the cobra command writes the result.
+// GenerateOptions carries the on-disk locations `de compose build` needs to
+// resolve local members (`--path`): the composition file's directory and the base
+// dir the generated cmd/<name> tree is written under. The go.mod `replace` target
+// is computed relative to the generated go.mod, and each local member's own
+// go.mod is read to derive the module path + its devedge-sdk pin.
+type GenerateOptions struct {
+	// CompositionDir is the directory of the composition file. A member's stored
+	// --path is resolved relative to it.
+	CompositionDir string
+	// OutBaseDir is the base dir the generated cmd/<name> tree is written under
+	// (defaults to CompositionDir). The replace path is relative to
+	// filepath.Join(OutBaseDir, "cmd", name).
+	OutBaseDir string
+}
+
+// resolvedRef is a ModuleRef enriched with the facts a valid go.mod needs: the Go
+// MODULE path (not the package import path) to require/replace, the require
+// version, an optional local replace target, and the member's own devedge-sdk pin.
+type resolvedRef struct {
+	ModuleRef
+	// GoModulePath is the module path to write in require/replace (from the local
+	// member's go.mod when --path is set, else the package import path).
+	GoModulePath string
+	// RequireVersion is the version token for the require line (a real pin, or the
+	// local pseudo-version when the member is resolved by a replace).
+	RequireVersion string
+	// ReplaceTarget is the relative path a `replace` points at (empty when the
+	// member is published/pinned, not local).
+	ReplaceTarget string
+	// SDK is the devedge-sdk version this member's own go.mod pins (empty when not
+	// locally resolvable).
+	SDK string
+}
+
+// Generate renders the composed-binary sources for a composition. It reads each
+// local member's go.mod (when `de compose add --path` recorded one) to derive the
+// composed go.mod's replace directives and its devedge-sdk pin, so the generated
+// host builds against the SAME SDK its members do.
 //
 // goVersion is the Go toolchain version line for the generated go.mod (e.g.
-// "1.26.0"); modulePath is the Go module path of the generated binary (e.g.
-// "github.com/acme/control-plane/cmd/control-plane").
-func Generate(c *config.Composition, goVersion, modulePath string) (GeneratedFiles, error) {
+// "1.26.0"); modulePath is the Go module path of the generated binary.
+func Generate(c *config.Composition, goVersion, modulePath string, opts GenerateOptions) (GeneratedFiles, error) {
 	refs, err := ResolveModuleRefs(c)
 	if err != nil {
 		return GeneratedFiles{}, err
 	}
 	name := c.Project()
 	dir := "cmd/" + name
+
+	outBase := opts.OutBaseDir
+	if outBase == "" {
+		outBase = opts.CompositionDir
+	}
+	cmdDir := filepath.Join(outBase, "cmd", name)
+
+	resolved, sdk, err := resolveRefs(refs, opts.CompositionDir, cmdDir)
+	if err != nil {
+		return GeneratedFiles{}, err
+	}
+
 	return GeneratedFiles{
 		MainGo: renderMainGo(c, refs),
-		GoMod:  renderGoMod(modulePath, goVersion, refs),
-		Lock:   renderLock(c, refs, goVersion),
+		GoMod:  renderGoMod(modulePath, goVersion, sdk, resolved),
+		Lock:   renderLock(c, refs, goVersion, sdk),
 		Dir:    dir,
+		SDK:    sdk,
 	}, nil
 }
 
-// renderMainGo renders cmd/<name>/main.go: it imports each member module package
-// and calls servicekit.Run with a HostConfig built from the composition spec —
-// STATIC composition (the modules are imported, not loaded as plugins).
+// resolveRefs enriches each ModuleRef into a resolvedRef and derives the composed
+// binary's devedge-sdk pin from the members. A member with a local Path has its
+// go.mod read for its module path + SDK pin and is required at the local
+// pseudo-version behind a replace; a published member is required at its pinned
+// version (an unpinned published member is an error — no version to build).
+func resolveRefs(refs []ModuleRef, compositionDir, cmdDir string) ([]resolvedRef, string, error) {
+	// filepath.Rel needs both operands absolute (or both relative); the composition
+	// dir + generated cmd dir may arrive relative (e.g. "." for the default file),
+	// so anchor everything to absolute before computing the replace target.
+	absCmdDir, err := filepath.Abs(cmdDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve output dir: %w", err)
+	}
+	absCompDir, err := filepath.Abs(compositionDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve composition dir: %w", err)
+	}
+	out := make([]resolvedRef, 0, len(refs))
+	var sdks []string
+	for _, r := range refs {
+		rr := resolvedRef{ModuleRef: r, GoModulePath: r.ImportPath, RequireVersion: r.Version}
+		if r.Path != "" {
+			memberDir := r.Path
+			if !filepath.IsAbs(memberDir) {
+				memberDir = filepath.Join(absCompDir, r.Path)
+			}
+			modPath, sdk, err := readMemberGoMod(memberDir)
+			if err != nil {
+				return nil, "", fmt.Errorf("member %q: %w", r.Name, err)
+			}
+			rel, err := filepath.Rel(absCmdDir, memberDir)
+			if err != nil {
+				return nil, "", fmt.Errorf("member %q: relative path: %w", r.Name, err)
+			}
+			rr.GoModulePath = modPath
+			rr.RequireVersion = localReplaceVersion
+			rr.ReplaceTarget = filepath.ToSlash(rel)
+			rr.SDK = sdk
+			if sdk != "" {
+				sdks = append(sdks, sdk)
+			}
+		} else if r.Version == "" {
+			return nil, "", fmt.Errorf("member %q has no version: pin it with `de compose add %s@<version>` or point at a local checkout with `de compose add %s --path <dir>`", r.Name, r.ImportPath, r.ImportPath)
+		}
+		out = append(out, rr)
+	}
+	return out, maxSDK(sdks), nil
+}
+
+// readMemberGoMod reads a local member module's go.mod, returning its module path
+// and the devedge-sdk version it requires (empty if it does not require the SDK).
+func readMemberGoMod(memberDir string) (modulePath, sdk string, err error) {
+	data, err := os.ReadFile(filepath.Join(memberDir, "go.mod"))
+	if err != nil {
+		return "", "", fmt.Errorf("read go.mod (is --path a Go module root?): %w", err)
+	}
+	mf, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("parse go.mod: %w", err)
+	}
+	if mf.Module == nil || mf.Module.Mod.Path == "" {
+		return "", "", fmt.Errorf("go.mod has no module path")
+	}
+	for _, req := range mf.Require {
+		if req.Mod.Path == "github.com/infobloxopen/devedge-sdk" {
+			sdk = req.Mod.Version
+			break
+		}
+	}
+	return mf.Module.Mod.Path, sdk, nil
+}
+
+// maxSDK returns the highest devedge-sdk version among the members (semver order),
+// or DefaultSDKVersion when none was derivable.
+func maxSDK(versions []string) string {
+	best := ""
+	for _, v := range versions {
+		if v == "" || !semver.IsValid(v) {
+			continue
+		}
+		if best == "" || semver.Compare(v, best) > 0 {
+			best = v
+		}
+	}
+	if best == "" {
+		return DefaultSDKVersion
+	}
+	return best
+}
+
+// renderMainGo renders cmd/<name>/main.go: a HOST that opens ONE shared database,
+// builds each member module over it via the module's NewModule(db) seam, runs a
+// host-owned union migration, and serves them via servicekit.Run — STATIC
+// composition (the modules are imported, not loaded as plugins).
+//
+// WS-012 contract (Run 18 finding 079): a composable module exposes a uniform,
+// resource-agnostic NewModule(db) + Models() seam, so this generated host names no
+// member's repository or model. "Module owns domain, host owns process": the host
+// opens the shared connection; each module builds its own typed repository from it.
 func renderMainGo(c *config.Composition, refs []ModuleRef) string {
+	envPrefix := envKey(c.Project())
 	var b strings.Builder
 	b.WriteString("// Code generated by `de compose build`; DO NOT EDIT.\n")
 	b.WriteString("//\n")
-	fmt.Fprintf(&b, "// Composed host for %q (WS-012). It IMPORTS the member service modules and\n", c.Project())
-	b.WriteString("// runs them in ONE process via servicekit.Run — static composition, no Go\n")
-	b.WriteString("// plugins. Regenerate after editing the composition (do not hand-edit).\n")
+	fmt.Fprintf(&b, "// Composed host for %q (WS-012). It IMPORTS the member service modules, opens\n", c.Project())
+	b.WriteString("// ONE shared database, builds each module over it via the module's NewModule(db)\n")
+	b.WriteString("// seam, and runs them in ONE process via servicekit.Run — static composition, no\n")
+	b.WriteString("// Go plugins. Regenerate after editing the composition (do not hand-edit).\n")
 	b.WriteString("package main\n\n")
 
 	b.WriteString("import (\n")
-	b.WriteString("\t\"log\"\n\n")
+	b.WriteString("\t\"context\"\n")
+	b.WriteString("\t\"log\"\n")
+	b.WriteString("\t\"log/slog\"\n")
+	b.WriteString("\t\"os\"\n")
+	b.WriteString("\t\"os/signal\"\n")
+	b.WriteString("\t\"syscall\"\n\n")
+	b.WriteString("\t\"github.com/glebarez/sqlite\"\n")
+	b.WriteString("\t\"gorm.io/gorm\"\n")
+	b.WriteString("\t\"gorm.io/gorm/logger\"\n\n")
+	b.WriteString("\t\"github.com/infobloxopen/devedge-sdk/authz\"\n")
+	b.WriteString("\t\"github.com/infobloxopen/devedge-sdk/authz/grpcauthz\"\n")
+	b.WriteString("\t\"github.com/infobloxopen/devedge-sdk/persistence/gormtx\"\n")
 	b.WriteString("\t\"github.com/infobloxopen/devedge-sdk/servicekit\"\n")
 	for _, r := range refs {
 		fmt.Fprintf(&b, "\t%s %q\n", r.Alias, r.ImportPath)
@@ -68,19 +251,69 @@ func renderMainGo(c *config.Composition, refs []ModuleRef) string {
 	b.WriteString(")\n\n")
 
 	b.WriteString("func main() {\n")
-	b.WriteString("\thc := servicekit.HostConfig{\n")
-	b.WriteString("\t\tModules: []servicekit.Module{\n")
-	for _, r := range refs {
-		fmt.Fprintf(&b, "\t\t\t%s.Module(),\n", r.Alias)
-	}
-	b.WriteString("\t\t},\n")
+	b.WriteString("\t// The HOST owns the process: signals, and the ONE shared database every\n")
+	b.WriteString("\t// module namespaces itself within.\n")
+	b.WriteString("\tctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)\n")
+	b.WriteString("\tdefer stop()\n\n")
 
+	b.WriteString("\t// Dev default: in-memory SQLite (pure-Go, no CGo) so the composed binary runs\n")
+	fmt.Fprintf(&b, "\t// out of the box. Set %s_DSN to a postgres:// URL and swap the dialector\n", envPrefix)
+	b.WriteString("\t// for production (versioned migrations then apply through module/migrations).\n")
+	fmt.Fprintf(&b, "\tdsn := os.Getenv(%q)\n", envPrefix+"_DSN")
+	b.WriteString("\tif dsn == \"\" {\n")
+	b.WriteString("\t\tdsn = \"file::memory:?cache=shared\"\n")
+	b.WriteString("\t}\n")
+	b.WriteString("\tdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})\n")
+	b.WriteString("\tif err != nil {\n")
+	fmt.Fprintf(&b, "\t\tlog.Fatalf(%q, err)\n", c.Project()+": open db: %v")
+	b.WriteString("\t}\n\n")
+
+	b.WriteString("\t// Each module builds its OWN repository from the shared connection (module\n")
+	b.WriteString("\t// owns domain); the host just hands over the connection.\n")
+	b.WriteString("\tmodules := []servicekit.Module{\n")
+	for _, r := range refs {
+		fmt.Fprintf(&b, "\t\t%s.NewModule(db),\n", r.Alias)
+	}
+	b.WriteString("\t}\n\n")
+
+	b.WriteString("\t// Host-run migration (WS-012 P2): AutoMigrate the union of every module's dev\n")
+	b.WriteString("\t// models once on the SQLite fast-path. On Postgres the versioned SQL in each\n")
+	b.WriteString("\t// module/migrations is the schema-of-record (run through this same seam).\n")
+	b.WriteString("\tvar models []any\n")
+	for _, r := range refs {
+		fmt.Fprintf(&b, "\tmodels = append(models, %s.Models()...)\n", r.Alias)
+	}
+	b.WriteString("\tmigrate := func(ctx context.Context, ns servicekit.DatabaseNamespace, d servicekit.DatabaseDescriptor) error {\n")
+	b.WriteString("\t\treturn gormtx.MigrateModule(ctx, db, gormtx.MigrateOptions{\n")
+	b.WriteString("\t\t\tNamespace:        ns,\n")
+	b.WriteString("\t\t\tDomainModels:     models,\n")
+	b.WriteString("\t\t\tSkipAdvisoryLock: db.Dialector.Name() != \"postgres\",\n")
+	b.WriteString("\t\t})\n")
+	b.WriteString("\t}\n\n")
+
+	b.WriteString("\t// Dev authorizer + principal (the same default the standalone scaffold ships):\n")
+	b.WriteString("\t// grant group:admin every verb; a caller is authorized by sending\n")
+	b.WriteString("\t// `account-id: <tenant>` + `groups: admin`. Replace BOTH in production.\n")
+	b.WriteString("\tauthorizer := authz.NewDevAuthorizer(authz.Grant{\n")
+	b.WriteString("\t\tTenant:   \"*\",\n")
+	b.WriteString("\t\tSubjects: []string{\"group:admin\"},\n")
+	b.WriteString("\t\tVerbs:    []authz.Verb{\"*\"},\n")
+	b.WriteString("\t\tResource: \"*\",\n")
+	b.WriteString("\t})\n\n")
+
+	b.WriteString("\thc := servicekit.HostConfig{\n")
+	b.WriteString("\t\tModules:       modules,\n")
 	if g := c.Spec.Runtime.GRPC; g != "" {
-		fmt.Fprintf(&b, "\t\tGRPCAddr: %q,\n", g)
+		fmt.Fprintf(&b, "\t\tGRPCAddr:      %q,\n", g)
 	}
 	if h := c.Spec.Runtime.HTTP; h != "" {
-		fmt.Fprintf(&b, "\t\tHTTPAddr: %q,\n", h)
+		fmt.Fprintf(&b, "\t\tHTTPAddr:      %q,\n", h)
 	}
+	b.WriteString("\t\tMigrate:       migrate,\n")
+	b.WriteString("\t\tAuthorizer:    authorizer,\n")
+	b.WriteString("\t\tPrincipalFunc: grpcauthz.DevPrincipalFunc(),\n")
+	b.WriteString("\t\tLogger:        slog.Default(),\n")
+	b.WriteString("\t\tContext:       ctx,\n")
 
 	if d := c.Spec.Database; d != nil {
 		b.WriteString("\t\tDatabase: &servicekit.DatabaseConfig{\n")
@@ -113,36 +346,77 @@ func renderMainGo(c *config.Composition, refs []ModuleRef) string {
 	}
 
 	b.WriteString("\t}\n")
+	fmt.Fprintf(&b, "\tlog.Printf(%q, hc.GRPCAddr, hc.HTTPAddr)\n", c.Project()+": serving gRPC on %s, HTTP on %s")
 	b.WriteString("\tif err := servicekit.Run(hc); err != nil {\n")
 	b.WriteString("\t\tlog.Fatal(err)\n")
 	b.WriteString("\t}\n")
 	b.WriteString("}\n")
+	// gofmt the generated source so it lands gofmt-clean (import grouping etc.);
+	// fall back to the unformatted string if it somehow does not parse.
+	if formatted, err := format.Source([]byte(b.String())); err == nil {
+		return string(formatted)
+	}
 	return b.String()
 }
 
-// renderGoMod renders the composed binary's go.mod: its module path, Go version,
-// and a require for the SDK plus each pinned member module's enclosing module.
-// Member requires use the module's import path with its pinned version; an
-// unpinned member is required at "latest" (the lock records the gap).
-func renderGoMod(modulePath, goVersion string, refs []ModuleRef) string {
+// envKey turns a composition name into an environment-variable-safe prefix
+// (upper-cased, non-alphanumerics to "_").
+func envKey(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r - 32)
+		case (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+// renderGoMod renders the composed binary's go.mod: its module path, Go version, a
+// require for the SDK (derived pin) + the migration sub-module + each member's
+// enclosing Go module, and a `replace` for every local (--path) member so
+// `go mod tidy` resolves it from disk instead of fetching an unpublished path.
+func renderGoMod(modulePath, goVersion, sdkVersion string, refs []resolvedRef) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "module %s\n\n", modulePath)
 	fmt.Fprintf(&b, "go %s\n\n", goVersion)
 	b.WriteString("require (\n")
-	fmt.Fprintf(&b, "\tgithub.com/infobloxopen/devedge-sdk %s\n", SDKVersion)
-	// Deduplicate by import path; the same enclosing module may host >1 member.
+	fmt.Fprintf(&b, "\tgithub.com/infobloxopen/devedge-sdk %s\n", sdkVersion)
+	fmt.Fprintf(&b, "\t%s %s\n", gormtxModule, sdkVersion)
+	// Deduplicate by module path; the same enclosing module may host >1 member.
 	seen := map[string]struct{}{}
 	for _, r := range refs {
-		if _, dup := seen[r.ImportPath]; dup {
+		if _, dup := seen[r.GoModulePath]; dup {
 			continue
 		}
-		seen[r.ImportPath] = struct{}{}
-		ver := r.Version
-		if ver == "" {
-			ver = "latest"
-		}
-		fmt.Fprintf(&b, "\t%s %s\n", r.ImportPath, ver)
+		seen[r.GoModulePath] = struct{}{}
+		fmt.Fprintf(&b, "\t%s %s\n", r.GoModulePath, r.RequireVersion)
 	}
 	b.WriteString(")\n")
+
+	// Local members: a replace so `go mod tidy` resolves them from the checkout.
+	replaces := make([]resolvedRef, 0, len(refs))
+	seenRep := map[string]struct{}{}
+	for _, r := range refs {
+		if r.ReplaceTarget == "" {
+			continue
+		}
+		if _, dup := seenRep[r.GoModulePath]; dup {
+			continue
+		}
+		seenRep[r.GoModulePath] = struct{}{}
+		replaces = append(replaces, r)
+	}
+	if len(replaces) > 0 {
+		b.WriteString("\nreplace (\n")
+		for _, r := range replaces {
+			fmt.Fprintf(&b, "\t%s => %s\n", r.GoModulePath, r.ReplaceTarget)
+		}
+		b.WriteString(")\n")
+	}
 	return b.String()
 }
