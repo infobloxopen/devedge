@@ -59,6 +59,7 @@ func rootCmd() *cobra.Command {
 		inspectCmd(),
 		newCmd(),
 		ufeCmd(),
+		cliCmd(),
 		projectCmd(),
 		migrateCmd(),
 		composeCmd(),
