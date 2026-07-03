@@ -1,0 +1,9 @@
+module {{.Module}}
+
+go {{.GoVersion}}
+
+require (
+	github.com/hashicorp/terraform-plugin-framework {{.Versions.Framework}}
+	github.com/hashicorp/terraform-plugin-framework-validators {{.Versions.Validators}}
+	github.com/infobloxopen/devedge-terraform-sdk {{.Versions.SDK}}
+)

@@ -60,6 +60,7 @@ func rootCmd() *cobra.Command {
 		newCmd(),
 		ufeCmd(),
 		cliCmd(),
+		terraformCmd(),
 		projectCmd(),
 		migrateCmd(),
 		composeCmd(),

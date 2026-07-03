@@ -1,0 +1,47 @@
+# Terraform provider release workflow.
+#
+# On a v* tag, GoReleaser builds the multi-platform archives, produces the
+# GPG-detached-signed SHA256SUMS, and publishes them (plus the registry
+# manifest) to a GitHub release the Terraform Registry can ingest.
+#
+# Required repository secrets (see README.md "Publish to the Terraform
+# Registry"):
+#   GPG_PRIVATE_KEY  ASCII-armored private signing key
+#   PASSPHRASE       passphrase for that key
+# Without them the release job cannot sign; `goreleaser build --snapshot` runs
+# locally without any secrets.
+#
+# The '${{"{{"}} ... {{"}}"}}' expressions are GitHub Actions expressions,
+# evaluated by Actions — not by the de scaffold.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@v6
+        id: import_gpg
+        with:
+          gpg_private_key: ${{"{{ secrets.GPG_PRIVATE_KEY }}"}}
+          passphrase: ${{"{{ secrets.PASSPHRASE }}"}}
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          args: release --clean
+        env:
+          GPG_FINGERPRINT: ${{"{{ steps.import_gpg.outputs.fingerprint }}"}}
+          GITHUB_TOKEN: ${{"{{ secrets.GITHUB_TOKEN }}"}}
