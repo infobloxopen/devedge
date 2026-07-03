@@ -86,6 +86,7 @@ func TestRender_PlaceholderFreeTree(t *testing.T) {
 	expected := []string{
 		"go.mod",
 		"main.go",
+		"session.go",
 		"domains_gen.go",
 		"README.md",
 		".gitignore",
@@ -116,6 +117,18 @@ func TestRender_PlaceholderFreeTree(t *testing.T) {
 	} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.go: missing shell wiring %q", want)
+		}
+	}
+
+	// session.go carries the single overridable auth seam: the generic OIDC
+	// device-grant factory (a private preset replaces this file wholesale).
+	session := readFile(t, filepath.Join(root, "session.go"))
+	for _, want := range []string{
+		"func newSessionFactory() clikit.SessionFactory",
+		"oidc.New(oidc.Config{",
+	} {
+		if !strings.Contains(session, want) {
+			t.Errorf("session.go: missing seam %q", want)
 		}
 	}
 
