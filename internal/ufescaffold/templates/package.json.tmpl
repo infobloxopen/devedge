@@ -9,7 +9,7 @@
     "start": "ng serve",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "test": "ng test",
-    "doctor": "devedge-ufe doctor --url https://localhost:{{ .DevPort }} --app {{ .AppID }} --metadata metadata.js"
+    "doctor": "devedge-ufe doctor --url http://localhost:{{ .DevPort }} --app {{ .AppID }} --metadata metadata.js"
   },
   "dependencies": {
     "@angular/animations": "{{ .Versions.Angular }}",

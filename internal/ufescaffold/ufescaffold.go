@@ -55,6 +55,13 @@ var DefaultVersions = Versions{
 	TypeScript:      "~4.9.5",
 }
 
+// DefaultDevPort is the dev-server port a generated uFE listens on when a
+// caller does not set Params.DevPort. It is the single source of truth shared
+// by the scaffold (angular.json serve target) and the shell-roster upstream, so
+// the generated uFE is routable without extra flags. It is NOT 4200 — that is
+// the shell root-config's own port — so the uFE and its shell never collide.
+const DefaultDevPort = 4201
+
 // Params configures one uFE scaffold render.
 type Params struct {
 	// Name is the uFE name: used as the project dir name, the npm package
@@ -64,6 +71,10 @@ type Params struct {
 	// ParentDir is the directory the project directory is created in. Empty
 	// defaults to ".". The project root is ParentDir/Name.
 	ParentDir string
+	// DevPort is the dev-server port written into the generated angular.json
+	// serve target. It must match the shell-roster upstream port so the uFE is
+	// routable. Zero selects DefaultDevPort.
+	DevPort int
 	// Preset, when non-empty, names a BUILT-IN overlay applied on top of the
 	// base scaffold after the base is rendered. The public CLI ships no
 	// proprietary built-in preset; an unknown preset is a clear error pointing
@@ -130,6 +141,9 @@ func Render(p Params) error {
 	if p.ParentDir == "" {
 		p.ParentDir = "."
 	}
+	if p.DevPort == 0 {
+		p.DevPort = DefaultDevPort
+	}
 
 	if p.Preset != "" && p.PresetDir != "" {
 		return fmt.Errorf("--preset and --preset-dir are mutually exclusive; pass one")
@@ -152,7 +166,7 @@ func Render(p Params) error {
 		Package:   "csp-" + p.Name + "-ufe",
 		AppID:     p.Name,
 		TitleName: titleCase(p.Name),
-		DevPort:   4200,
+		DevPort:   p.DevPort,
 		Versions:  DefaultVersions,
 	}
 

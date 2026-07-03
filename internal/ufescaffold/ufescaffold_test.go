@@ -193,6 +193,41 @@ func TestRender_HomeComponentDeclared(t *testing.T) {
 	assertHomeComponentDeclared(t, filepath.Join(parent, "widgets"))
 }
 
+// TestRender_ServeTargetAndPort guards the two scaffold-bootstrap traps that a
+// fresh developer hits on the very first `pnpm start`:
+//   - the serve target option must be `browserTarget` (what the pinned
+//     @angular-builders/custom-webpack@15 dev-server schema requires), never
+//     `buildTarget` (Angular 16+), which the schema rejects; and
+//   - the dev-server port must be the requested DevPort, so the shell-roster
+//     upstream and the real listener agree.
+func TestRender_ServeTargetAndPort(t *testing.T) {
+	// Default port.
+	parent := t.TempDir()
+	if err := Render(Params{Name: "demo", ParentDir: parent}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	ng := readFile(t, filepath.Join(parent, "demo", "angular.json"))
+	if strings.Contains(ng, "buildTarget") {
+		t.Error("angular.json serve uses buildTarget — @angular-builders/custom-webpack@15 rejects it; use browserTarget")
+	}
+	if !strings.Contains(ng, `"browserTarget": "demo:build"`) {
+		t.Error("angular.json serve does not set browserTarget")
+	}
+	if !strings.Contains(ng, `"port": 4201`) {
+		t.Errorf("angular.json serve port is not the default DevPort (4201):\n%s", ng)
+	}
+
+	// Explicit port must reach angular.json (finding 088).
+	parent2 := t.TempDir()
+	if err := Render(Params{Name: "widgets", ParentDir: parent2, DevPort: 4207}); err != nil {
+		t.Fatalf("Render(DevPort:4207): %v", err)
+	}
+	ng2 := readFile(t, filepath.Join(parent2, "widgets", "angular.json"))
+	if !strings.Contains(ng2, `"port": 4207`) {
+		t.Errorf("angular.json serve port did not follow DevPort=4207:\n%s", ng2)
+	}
+}
+
 // declarationsRe extracts the AppModule @NgModule declarations array contents.
 var declarationsRe = regexp.MustCompile(`declarations:\s*\[([^\]]*)\]`)
 

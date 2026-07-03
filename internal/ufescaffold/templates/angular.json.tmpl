@@ -52,12 +52,12 @@
         "serve": {
           "builder": "@angular-builders/custom-webpack:dev-server",
           "options": {
-            "buildTarget": "{{ .AppID }}:build",
+            "browserTarget": "{{ .AppID }}:build",
             "port": {{ .DevPort }}
           },
           "configurations": {
-            "production": { "buildTarget": "{{ .AppID }}:build:production" },
-            "development": { "buildTarget": "{{ .AppID }}:build:development" }
+            "production": { "browserTarget": "{{ .AppID }}:build:production" },
+            "development": { "browserTarget": "{{ .AppID }}:build:development" }
           },
           "defaultConfiguration": "development"
         }

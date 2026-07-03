@@ -25,6 +25,14 @@ already `{{ .AppID }}`.
   is identical.) HttpClient is registered with the `bearerAuthInterceptor`, so
   API calls carry the Bearer token. This uFE never authenticates — the shell
   owns OIDC.
+- **Local dev round-trips out of the box.** A devedge-sdk service runs the dev
+  authorizer, which reads raw `account-id`/`groups` metadata — not a bearer
+  token — so the bearer interceptor alone gets `PermissionDenied` in local dev.
+  `AppModule` also registers `devAuthInterceptor`, which stamps the identity
+  headers from `environment.devAuthHeaders` (`account-id: t1`, `groups: admin`)
+  onto same-origin API calls. Edit those values for your tenant. It is a no-op
+  in production (`environment.prod.ts` leaves `devAuthHeaders` empty), where
+  real OIDC and the bearer token take over.
 - **The webpack/`angular.json` wiring is clean.** A single
   `@angular-builders/custom-webpack:browser` build using `extra-webpack.config.js`;
   no dead `single-spa` architect targets pointing at a non-existent
@@ -38,41 +46,48 @@ pnpm install     # (or npm install)
 ```
 
 The `@infobloxopen/devedge-ufe-*` packages are referenced by version. **Until
-they are published**, link them from a local checkout of the SDK:
+they are published**, link them from a local checkout of the SDK with a `link:`
+dependency — this points each package at your local build without a global
+registry:
 
 ```sh
-# From a clone of infobloxopen/devedge-ufe-sdk (built with `pnpm -r build`):
-pnpm link --global   # in each packages/* dir, OR use file: overrides
-# then, here:
-pnpm link --global @infobloxopen/devedge-ufe-core \
-  @infobloxopen/devedge-ufe-angular \
-  @infobloxopen/devedge-ufe-single-spa \
-  @infobloxopen/devedge-ufe-oidc \
-  @infobloxopen/devedge-ufe-dev-loop
+# From a clone of infobloxopen/devedge-ufe-sdk, built with `pnpm -r build`.
+# Run these here (in the uFE project); adjust the path to your checkout:
+SDK=../devedge-ufe-sdk/packages
+pnpm add "@infobloxopen/devedge-ufe-core@link:$SDK/core" \
+  "@infobloxopen/devedge-ufe-angular@link:$SDK/angular" \
+  "@infobloxopen/devedge-ufe-single-spa@link:$SDK/single-spa" \
+  "@infobloxopen/devedge-ufe-oidc@link:$SDK/oidc" \
+  "@infobloxopen/devedge-ufe-dev-loop@link:$SDK/dev-loop"
 ```
+
+`pnpm link --global` also works but needs a configured global bin dir
+(`pnpm setup`) and refuses to link a package into itself, so the `link:`
+dependency above is the simpler pre-publish path.
 
 ## Local dev loop
 
 ```sh
-pnpm start                 # ng serve on https://localhost:{{ .DevPort }}
+pnpm start                 # ng serve on http://localhost:{{ .DevPort }}
 pnpm run doctor            # devedge-ufe doctor: loud checklist, not a silent fail
 ```
 
 `doctor` runs the open-core `devedge-ufe doctor` against the dev server and
-reports the FIRST failing step (reachability → **TLS cert trust** → CORS →
-manifest → nav groups) with an actionable message.
+reports the FIRST failing step (reachability → TLS cert trust → CORS →
+manifest → nav groups) with an actionable message. The scaffold's dev server
+serves plain `http`, so `doctor` and the `--url` in `package.json` both use
+`http://localhost:{{ .DevPort }}` and the TLS-cert step passes trivially.
 
-> **Trust the dev cert.** A self-signed dev cert makes the shell fail to load
-> this uFE **silently**. `doctor` isolates it as its own step. Fix it by
-> trusting the cert (add it to your keychain, or set `NODE_EXTRA_CA_CERTS` to
-> its path), or serve over plain `http` for local dev. This is the single most
-> common silent-failure the dev loop catches.
+> **If you serve over `https`,** trust the dev cert or the shell fails to load
+> this uFE **silently** — add it to your keychain, or set `NODE_EXTRA_CA_CERTS`
+> to its path. Point `doctor` at the `https://` URL so it isolates a cert
+> problem as its own step instead of a generic network error.
 
 To point a running shell at this local bundle, use the import-map override:
 
 ```ts
 import { override } from '@infobloxopen/devedge-ufe-dev-loop';
-override('{{ .AppID }}', 'https://localhost:{{ .DevPort }}/main.js');
+override('{{ .AppID }}', 'http://localhost:{{ .DevPort }}/main.js');
 ```
 
 ## Build & deploy

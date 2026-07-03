@@ -229,10 +229,20 @@ func lsCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, colorHeader.Sprint("HOST\tUPSTREAM\tPROTO\tPROJECT\tSOURCE"))
+			fmt.Fprintln(w, colorHeader.Sprint("HOST\tPATH\tUPSTREAM\tPROTO\tPROJECT\tSOURCE"))
 			for _, r := range routes {
 				proto := string(r.EffectiveProtocol())
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", colorHost.Sprint(r.Host), r.Upstream, proto, r.Project, r.Source)
+				// Show the path prefix so several routes on one host (e.g. a shell's
+				// "/" catch-all and its "/api" backend) are distinguishable. A
+				// path-less catch-all shows "-"; a strip-prefix route is marked.
+				path := r.Path
+				switch {
+				case path == "":
+					path = "-"
+				case r.StripPrefix:
+					path += " (strip)"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", colorHost.Sprint(r.Host), path, r.Upstream, proto, r.Project, r.Source)
 			}
 			return w.Flush()
 		},

@@ -109,10 +109,26 @@ provider "zoned" {
 }
 ```
 
-Both carry the metadata the dev authorizer reads; the dev authorizer ignores the
-bearer token. In production you replace the dev authorizer and its
+For a micro-frontend consuming a generated TypeScript client, the Angular glue
+package ships the same seam. A `de ufe new` scaffold registers `devAuthInterceptor`
+alongside the bearer interceptor and reads the identity headers from
+`environment.devAuthHeaders`:
+
+```ts
+// src/environments/environment.ts (dev only)
+export const environment = {
+  production: false,
+  devAuthHeaders: { 'account-id': 't1', groups: 'admin' },
+};
+```
+
+The interceptor stamps those headers on same-origin API calls; `environment.prod.ts`
+leaves `devAuthHeaders` empty, so it is a no-op in production.
+
+Each surface carries the metadata the dev authorizer reads; the dev authorizer
+ignores the bearer token. In production you replace the dev authorizer and its
 `PrincipalFunc` with a real policy and a verified-token principal, and drop the
-`--header` / `headers` values.
+`--header` / `headers` / `devAuthHeaders` values.
 
 ## Open core, private overlay
 
