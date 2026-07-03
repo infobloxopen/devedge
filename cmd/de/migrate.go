@@ -81,7 +81,7 @@ type migrateOpts struct {
 // migrations dir and/or a project file.
 func bindCommonFlags(cmd *cobra.Command, o *migrateOpts) {
 	cmd.Flags().StringVarP(&o.file, "file", "f", "devedge.yaml", "project config file (to resolve the migrations dir + DSN)")
-	cmd.Flags().StringVar(&o.dir, "dir", "", "migrations directory (default: the devedge.yaml dependency's, else ./db/migrations)")
+	cmd.Flags().StringVar(&o.dir, "dir", "", "migrations directory (default: the devedge.yaml dependency's, else ./module/migrations for an SDK service scaffold, else ./db/migrations)")
 	cmd.Flags().StringVar(&o.dependency, "dependency", "", "which postgres dependency to target when the project declares several")
 }
 
@@ -686,15 +686,30 @@ func loadProjInfo(o *migrateOpts) projInfo {
 	return info
 }
 
+// isDir reports whether path exists and is a directory.
+func isDir(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
+}
+
 // resolveMigrationsDir determines the migrations directory. Precedence: --dir,
-// then the devedge.yaml dependency's migrations path, then ./db/migrations. When
-// mustExist, the directory must exist and be a directory.
+// then the devedge.yaml dependency's migrations path, then a `devedge-sdk new
+// service` scaffold's module/migrations, then ./db/migrations. When mustExist,
+// the directory must exist and be a directory.
 func resolveMigrationsDir(o *migrateOpts, mustExist bool) (string, error) {
 	dir := o.dir
 	if dir == "" {
-		if info := loadProjInfo(o); info.found {
+		switch info := loadProjInfo(o); {
+		case info.found:
 			dir = filepath.Join(filepath.Dir(o.file), info.migRel)
-		} else {
+		case isDir("module/migrations"):
+			// A `devedge-sdk new service` scaffold has no devedge.yaml; its
+			// migrations live in module/migrations and are embedded via the
+			// module's `//go:embed migrations`. Prefer that over the
+			// `de project init` default so `de migrate` writes where the service
+			// actually reads (finding 060).
+			dir = "module/migrations"
+		default:
 			dir = "db/migrations"
 		}
 	}

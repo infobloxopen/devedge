@@ -133,7 +133,7 @@ func runGenerate(cmd *cobra.Command, dir string) error {
 
 	// 4. Convert the emitted OpenAPI v2 surface to v3, in place under openapi/.
 	if plan.openapi {
-		if err := runOpenAPIV2To3(cmd, dir, binDir); err != nil {
+		if err := runOpenAPIV2To3(cmd, dir, binDir, bufRef, env); err != nil {
 			return err
 		}
 	}
@@ -290,9 +290,11 @@ func resolveServiceSDKVersion(cmd *cobra.Command, dir string) (string, error) {
 
 // runOpenAPIV2To3 converts the OpenAPI v2 (swagger.json) files protoc-gen-openapiv2
 // emitted under openapi/ into OpenAPI v3, in place, with the SDK's pinned
-// openapiv2to3 (in binDir). Mirrors the scaffold Makefile step
-// `openapiv2to3 openapi/<bin>.swagger.json openapi`.
-func runOpenAPIV2To3(cmd *cobra.Command, dir, binDir string) error {
+// openapiv2to3 (in binDir). Since devedge-sdk v0.48.0 (WS-024) the tool runs a
+// lossless enrichment pass over a proto FileDescriptorSet, so it requires
+// `-descriptor <fds.binpb>`. We build that set once with the same pinned buf that
+// step 3 ran, then pass it to every conversion.
+func runOpenAPIV2To3(cmd *cobra.Command, dir, binDir, bufRef string, env []string) error {
 	swaggers, err := filepath.Glob(filepath.Join(dir, "openapi", "*.swagger.json"))
 	if err != nil {
 		return fmt.Errorf("scan openapi/: %w", err)
@@ -300,15 +302,31 @@ func runOpenAPIV2To3(cmd *cobra.Command, dir, binDir string) error {
 	if len(swaggers) == 0 {
 		return fmt.Errorf("openapiv2->v3: no openapi/*.swagger.json found after buf generate (expected an OpenAPI v2 surface)")
 	}
-	tool := filepath.Join(binDir, toolchain.OpenAPIV2To3Bin)
 	out := cmd.OutOrStdout()
+
+	// Build the FileDescriptorSet the enrichment reads. `--as-file-descriptor-set`
+	// yields a raw descriptorpb.FileDescriptorSet (with imports) that openapiv2to3
+	// unmarshals directly. It is a transient build input, not committed output.
+	fdsFile, err := os.CreateTemp("", "de-openapi-fds-*.binpb")
+	if err != nil {
+		return fmt.Errorf("openapiv2->v3: create descriptor-set temp: %w", err)
+	}
+	fds := fdsFile.Name()
+	fdsFile.Close()
+	defer os.Remove(fds)
+	fmt.Fprintf(out, "generate: buf build (FileDescriptorSet for OpenAPI v3 enrichment)\n")
+	if err := runTool(cmd, dir, env, "go", "run", bufRef, "build", "--as-file-descriptor-set", "-o", fds); err != nil {
+		return fmt.Errorf("buf build (descriptor set for openapiv2to3): %w", err)
+	}
+
+	tool := filepath.Join(binDir, toolchain.OpenAPIV2To3Bin)
 	for _, sw := range swaggers {
 		rel, err := filepath.Rel(dir, sw)
 		if err != nil {
 			rel = sw
 		}
 		fmt.Fprintf(out, "generate: openapiv2to3 %s -> openapi/ (v3)\n", filepath.Base(sw))
-		if err := runTool(cmd, dir, nil, tool, rel, "openapi"); err != nil {
+		if err := runTool(cmd, dir, nil, tool, "-descriptor", fds, rel, "openapi"); err != nil {
 			return fmt.Errorf("openapiv2to3 %s: %w", rel, err)
 		}
 	}
