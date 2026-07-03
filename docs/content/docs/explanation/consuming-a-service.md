@@ -129,6 +129,11 @@ de cli add --input orders.openapi.yaml  --domain orders
 This is the CLI mirror of composing a suite from many services: the contract is
 the unit of composition, and the catalog is the roster of contracts to draw from.
 
+The Terraform provider composes the same way: `de terraform add` re-derives the
+provider's resource registration from *every* resource generated under
+`internal/provider/`, so adding each service's contract accumulates its resources
+into one `terraform-provider-<app>` — a single provider covering many domains.
+
 ## The repositories
 
 | Repository | Role |
