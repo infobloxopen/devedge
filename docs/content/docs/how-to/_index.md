@@ -14,6 +14,7 @@ the [project README](https://github.com/infobloxopen/devedge#readme).
   {{< card link="../reference/cli/cluster/" title="Use a k3d cluster" subtitle="Create, attach, and watch Kubernetes clusters." >}}
   {{< card link="../reference/cli/ci/" title="Run in CI" subtitle="Run tests against an ephemeral cluster." >}}
   {{< card link="../reference/cli/cell/" title="Deploy across cells" subtitle="Deploy cells and move tenants between them." >}}
+  {{< card link="define-slos/" title="Define and ship SLOs" subtitle="Derive, lint, calibrate, and render SLI/SLOs with de slo." >}}
 {{< /cards >}}
 
 {{< callout type="info" >}}

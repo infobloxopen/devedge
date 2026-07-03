@@ -83,6 +83,7 @@ func rootCmd() *cobra.Command {
 		lintCmd(),
 		imageCmd(),
 		syncCmd(),
+		sloCmd(),
 	)
 
 	applyColoredHelp(root)
