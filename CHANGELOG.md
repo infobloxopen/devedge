@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-07-04
+
+### Added
+
+- `de idp` now has a CLI reference page on the docs site (`make docs-cli` emits
+  `reference/cli/idp.md`); the same pass adds the other previously-ungenerated CLI
+  pages (build/generate/image/lint/migrate/sync/test). (WS-026 DX finding 104.)
+
+### Changed
+
+- `de idp clients sync --help` documents the `devedge.yaml` route `tile:` block
+  with its exact camelCase keys (`displayName`/`description`/`iconURL`/`launchURL`)
+  and their mapping to the snake_case `idp-clients.json`, and warns that
+  unrecognized keys are ignored. (WS-026 DX finding 105.)
+
 ## [0.14.1] - 2026-07-04
 
 ### Fixed
