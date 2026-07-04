@@ -92,8 +92,14 @@ For each app the sync emits one OAuth2 client the IdP reads:
                   title-cased app name), description, icon_url, and launch_url
                   ("https://<host>/" unless the tile overrides it)
 
-Only HTTP apps become tiles (TCP routes — databases, etc. — are skipped). The
-output rewrites --out in full (idempotent merge/replace from current discovery).
+Only HTTP apps become tiles (TCP routes — databases, etc. — are skipped).
+
+--out is written as a FULL REPLACE of the current discovery — it is idempotent
+(re-running with the same inputs yields a byte-identical file), but it does NOT
+merge with clients already in the file. Any app not in THIS discovery is dropped.
+So run it with the daemon up (de start) so every registered app is discovered;
+running it from one service's directory with no daemon will drop the other apps'
+clients/tiles from a shared idp-clients.json.
 
 Examples:
   de idp clients sync
@@ -317,7 +323,7 @@ This is a thin wrapper over the same route registration ` + "`de register`" + ` 
 does NOT build or run the IdP binary — the reference IdP application lives in
 ` + idpRepo + `. Start the IdP there first (default :` + fmt.Sprint(defaultIDPPort) + `), then route it:
 
-  1. run the IdP:      git clone https://` + idpRepo + ` && cd devedge-idp && make run
+  1. run the IdP:      git clone https://` + idpRepo + ` && cd devedge-idp && go run ./cmd/idp
   2. sync its clients: de idp clients sync --out ./idp-clients.json
   3. route it:         de idp up
 
@@ -374,7 +380,7 @@ sample idp-clients.json are written into --dir so the file shapes are concrete.`
 			fmt.Fprintf(w, "%s\n", colorHeader.Sprint("The dev IdP is a standalone application."))
 			fmt.Fprintf(w, "Clone and run the reference implementation:\n")
 			fmt.Fprintf(w, "  git clone https://%s\n", idpRepo)
-			fmt.Fprintf(w, "  cd devedge-idp && make run    %s\n\n", colorLabel.Sprintf("# serves on :%d", defaultIDPPort))
+			fmt.Fprintf(w, "  cd devedge-idp && go run ./cmd/idp    %s\n\n", colorLabel.Sprintf("# serves on :%d", defaultIDPPort))
 			fmt.Fprintf(w, "Then wire it into the edge from your project:\n")
 			fmt.Fprintf(w, "  de idp up                     %s\n", colorLabel.Sprintf("# route %s -> the IdP", defaultIDPHost))
 			fmt.Fprintf(w, "  de idp clients sync           %s\n", colorLabel.Sprint("# discover apps -> idp-clients.json"))
