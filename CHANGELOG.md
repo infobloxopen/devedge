@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-04
+
+Adds the `de idp` verb group + app tile metadata (WS-026 dev security suite) and
+the `de slo` reliability-targets command group (WS-025). Requires devedge-sdk
+v0.52.0.
+
 ### Added
 
 #### Reliability targets — `de slo` (WS-025)
@@ -37,6 +43,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     USE, OTel semconv terms).
 - **Docs**: how-to guide *Define and ship SLOs* and the generated `de slo` CLI
   reference page.
+
+#### Dev identity-provider launchpad — `de idp` + app tile metadata (WS-026)
+
+- **`de idp` command group** is the discovery/registration substrate for the dev
+  IdP (`infobloxopen/devedge-idp`), the passwordless dev security suite.
+  - `de idp clients sync` — discover registered apps (the daemon `/v1/routes` +
+    local `devedge.yaml`/`kind:Shell`, best-effort/merged/deduped) and write
+    `idp-clients.json` (client_id = app name, dummy secret, redirect URI, and tile
+    metadata) — the file the IdP reads (hot-reloaded) to render its launchpad tiles.
+    Output is sorted so re-running is byte-idempotent.
+  - `de idp up` — route the IdP through the local edge at `idp.dev.test`.
+  - `de idp new` — guidance for standing up the reference IdP app (`--emit` writes
+    a starter `devedge.yaml` + sample `idp-clients.json`).
+- **App tile metadata** — an optional, backward-compatible `tile`
+  (name/description/icon/launch URL) on a route (`devedge.yaml`) or a `kind:Shell`
+  app, carried through the daemon registry so an app declares how it appears as a
+  launchpad tile. Existing configs with no tile are unaffected.
 
 ### Changed
 
