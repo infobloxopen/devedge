@@ -94,6 +94,25 @@ For each app the sync emits one OAuth2 client the IdP reads:
 
 Only HTTP apps become tiles (TCP routes — databases, etc. — are skipped).
 
+An app declares its tile in devedge.yaml (or a kind:Shell) under the route's
+'tile:' block. NOTE the field names are camelCase YAML keys and DIFFER from the
+snake_case JSON in the emitted idp-clients.json (this command maps between them):
+
+  spec:
+    routes:
+      - host: app.dev.test
+        path: /api/orders
+        upstream: http://127.0.0.1:8080
+        tile:
+          displayName: Orders          # -> idp-clients.json tile.name
+          description: Manage orders    # -> tile.description
+          iconURL: https://.../o.svg    # -> tile.icon_url
+          launchURL: https://app.dev.test/api/orders/   # -> tile.launch_url
+
+All tile keys are optional. Unrecognized keys are ignored (standard YAML), so a
+typo like 'name:' or 'launch_url:' silently falls back to the auto-derived
+title/URL — use the exact camelCase keys above.
+
 --out is written as a FULL REPLACE of the current discovery — it is idempotent
 (re-running with the same inputs yields a byte-identical file), but it does NOT
 merge with clients already in the file. Any app not in THIS discovery is dropped.

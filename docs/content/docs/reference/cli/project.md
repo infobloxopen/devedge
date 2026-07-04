@@ -73,7 +73,7 @@ devedge-managed service:
 After scaffolding, the project is immediately usable:
 
   cd NAME
-  make generate        # run protoc + authz codegen
+  de generate          # run protoc + authz codegen (buf + pinned plugins)
   de project up        # register routes and start dependencies
 
 For a full walk-through of the generated layout see AGENTS.md inside the
