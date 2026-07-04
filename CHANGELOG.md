@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-07-04
+
+### Changed
+
+- `de idp clients sync` now writes **`idp-clients.yaml`** (YAML) instead of JSON —
+  friendlier to hand-edit and hot-reload; the default `--out` is `idp-clients.yaml`
+  and `de idp new --emit` writes a YAML sample. The keys are unchanged
+  (`client_id`/`client_secret`/`redirect_uris`/`tile`), so a `.json` file with the
+  same keys is still accepted by the IdP (YAML is a superset of JSON). Pairs with
+  devedge-idp reading `idp-clients.yaml`/`grants.yaml` and devedge-sdk v0.54.0's
+  YAML grants file.
+
 ## [0.14.2] - 2026-07-04
 
 ### Added

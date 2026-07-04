@@ -13,7 +13,7 @@ The dev IdP is a passwordless, Okta-style login + app-tile launchpad. It is a
 separate application (github.com/infobloxopen/devedge-idp); this verb group is the
 discovery/registration substrate around it:
 
-  de idp clients sync   discover registered apps and write idp-clients.json
+  de idp clients sync   discover registered apps and write idp-clients.yaml
   de idp up             route the IdP through the edge at idp.dev.test
   de idp new            guidance for standing up the reference IdP app
 
@@ -74,8 +74,8 @@ For each app the sync emits one OAuth2 client the IdP reads:
 Only HTTP apps become tiles (TCP routes — databases, etc. — are skipped).
 
 An app declares its tile in devedge.yaml (or a kind:Shell) under the route's
-'tile:' block. NOTE the field names are camelCase YAML keys and DIFFER from the
-snake_case JSON in the emitted idp-clients.json (this command maps between them):
+'tile:' block. NOTE these are camelCase keys that DIFFER from the snake_case keys
+in the emitted idp-clients.yaml (this command maps between them):
 
   spec:
     routes:
@@ -83,7 +83,7 @@ snake_case JSON in the emitted idp-clients.json (this command maps between them)
         path: /api/orders
         upstream: http://127.0.0.1:8080
         tile:
-          displayName: Orders          # -> idp-clients.json tile.name
+          displayName: Orders          # -> idp-clients.yaml tile.name
           description: Manage orders    # -> tile.description
           iconURL: https://.../o.svg    # -> tile.icon_url
           launchURL: https://app.dev.test/api/orders/   # -> tile.launch_url
@@ -97,11 +97,11 @@ title/URL — use the exact camelCase keys above.
 merge with clients already in the file. Any app not in THIS discovery is dropped.
 So run it with the daemon up (de start) so every registered app is discovered;
 running it from one service's directory with no daemon will drop the other apps'
-clients/tiles from a shared idp-clients.json.
+clients/tiles from a shared idp-clients.yaml.
 
 Examples:
   de idp clients sync
-  de idp clients sync --out ../devedge-idp/idp-clients.json
+  de idp clients sync --out ../devedge-idp/idp-clients.yaml
   de idp clients sync --config shell.yaml
 
 Usage:
@@ -110,7 +110,7 @@ Usage:
 Flags:
       --config string   a local devedge.yaml/kind:Shell to include alongside the daemon; defaults to auto-detecting devedge.yaml and shell.yaml in the working dir
   -h, --help            help for sync
-      --out string      path to write the IdP clients file (default "idp-clients.json")
+      --out string      path to write the IdP clients file (default "idp-clients.yaml")
 ```
 
 ### `de idp new`
@@ -127,14 +127,14 @@ CLI's job is discovery/registration around it:
   de idp up             route the IdP through the edge at idp.dev.test
 
 With --emit, a starter devedge.yaml (routing idp.dev.test -> :8080) and a
-sample idp-clients.json are written into --dir so the file shapes are concrete.
+sample idp-clients.yaml are written into --dir so the file shapes are concrete.
 
 Usage:
   de idp new [flags]
 
 Flags:
       --dir string   directory to write starter files into (with --emit) (default ".")
-      --emit         also write a starter devedge.yaml + sample idp-clients.json
+      --emit         also write a starter devedge.yaml + sample idp-clients.yaml
   -h, --help         help for new
 ```
 
@@ -149,7 +149,7 @@ does NOT build or run the IdP binary — the reference IdP application lives in
 github.com/infobloxopen/devedge-idp. Start the IdP there first (default :8080), then route it:
 
   1. run the IdP:      git clone https://github.com/infobloxopen/devedge-idp && cd devedge-idp && go run ./cmd/idp
-  2. sync its clients: de idp clients sync --out ./idp-clients.json
+  2. sync its clients: de idp clients sync --out ./idp-clients.yaml
   3. route it:         de idp up
 
 The browser then reaches the IdP at https://idp.dev.test/.

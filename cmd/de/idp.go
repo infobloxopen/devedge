@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/infobloxopen/devedge/internal/daemon"
 	"github.com/infobloxopen/devedge/pkg/config"
@@ -24,7 +24,7 @@ const (
 	defaultIDPPort = 8080
 	// defaultClientsFile is where `de idp clients sync` writes the IdP clients
 	// file when --out is omitted.
-	defaultClientsFile = "idp-clients.json"
+	defaultClientsFile = "idp-clients.yaml"
 	// idpRepo is the reference dev IdP application `de idp` orchestrates around.
 	idpRepo = "github.com/infobloxopen/devedge-idp"
 )
@@ -43,7 +43,7 @@ The dev IdP is a passwordless, Okta-style login + app-tile launchpad. It is a
 separate application (` + idpRepo + `); this verb group is the
 discovery/registration substrate around it:
 
-  de idp clients sync   discover registered apps and write idp-clients.json
+  de idp clients sync   discover registered apps and write idp-clients.yaml
   de idp up             route the IdP through the edge at ` + defaultIDPHost + `
   de idp new            guidance for standing up the reference IdP app
 
@@ -95,8 +95,8 @@ For each app the sync emits one OAuth2 client the IdP reads:
 Only HTTP apps become tiles (TCP routes — databases, etc. — are skipped).
 
 An app declares its tile in devedge.yaml (or a kind:Shell) under the route's
-'tile:' block. NOTE the field names are camelCase YAML keys and DIFFER from the
-snake_case JSON in the emitted idp-clients.json (this command maps between them):
+'tile:' block. NOTE these are camelCase keys that DIFFER from the snake_case keys
+in the emitted idp-clients.yaml (this command maps between them):
 
   spec:
     routes:
@@ -104,7 +104,7 @@ snake_case JSON in the emitted idp-clients.json (this command maps between them)
         path: /api/orders
         upstream: http://127.0.0.1:8080
         tile:
-          displayName: Orders          # -> idp-clients.json tile.name
+          displayName: Orders          # -> idp-clients.yaml tile.name
           description: Manage orders    # -> tile.description
           iconURL: https://.../o.svg    # -> tile.icon_url
           launchURL: https://app.dev.test/api/orders/   # -> tile.launch_url
@@ -118,11 +118,11 @@ title/URL — use the exact camelCase keys above.
 merge with clients already in the file. Any app not in THIS discovery is dropped.
 So run it with the daemon up (de start) so every registered app is discovered;
 running it from one service's directory with no daemon will drop the other apps'
-clients/tiles from a shared idp-clients.json.
+clients/tiles from a shared idp-clients.yaml.
 
 Examples:
   de idp clients sync
-  de idp clients sync --out ../devedge-idp/idp-clients.json
+  de idp clients sync --out ../devedge-idp/idp-clients.yaml
   de idp clients sync --config shell.yaml`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -138,11 +138,10 @@ Examples:
 				return fmt.Errorf("discovered %d route(s) but none are HTTP apps eligible for a launchpad tile", len(routes))
 			}
 
-			data, err := json.MarshalIndent(clients, "", "  ")
+			data, err := yaml.Marshal(clients)
 			if err != nil {
 				return fmt.Errorf("encode clients: %w", err)
 			}
-			data = append(data, '\n')
 			if err := os.WriteFile(out, data, 0o644); err != nil {
 				return fmt.Errorf("write %s: %w", out, err)
 			}
@@ -207,23 +206,24 @@ func gatherIDPRoutes(cmd *cobra.Command, configPath string) (routes []types.Rout
 	return routes, sources
 }
 
-// idpTile is the launchpad presentation for a client in idp-clients.json. Its
+// idpTile is the launchpad presentation for a client in idp-clients.yaml. Its
 // fields serialize without omitempty so the object always carries all four keys
-// (empty string when unset), matching the shared contract the IdP consumes.
+// (empty when unset), matching the shared contract the IdP consumes. The keys are
+// identical in YAML and JSON.
 type idpTile struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	IconURL     string `json:"icon_url"`
-	LaunchURL   string `json:"launch_url"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description" yaml:"description"`
+	IconURL     string `json:"icon_url" yaml:"icon_url"`
+	LaunchURL   string `json:"launch_url" yaml:"launch_url"`
 }
 
-// idpClient is one OAuth2 client entry in idp-clients.json (the shared contract
+// idpClient is one OAuth2 client entry in idp-clients.yaml (the shared contract
 // the dev IdP reads).
 type idpClient struct {
-	ClientID     string   `json:"client_id"`
-	ClientSecret string   `json:"client_secret"`
-	RedirectURIs []string `json:"redirect_uris"`
-	Tile         idpTile  `json:"tile"`
+	ClientID     string   `json:"client_id" yaml:"client_id"`
+	ClientSecret string   `json:"client_secret" yaml:"client_secret"`
+	RedirectURIs []string `json:"redirect_uris" yaml:"redirect_uris"`
+	Tile         idpTile  `json:"tile" yaml:"tile"`
 }
 
 // buildIDPClients synthesizes the IdP client set from discovered routes. It
@@ -343,7 +343,7 @@ does NOT build or run the IdP binary — the reference IdP application lives in
 ` + idpRepo + `. Start the IdP there first (default :` + fmt.Sprint(defaultIDPPort) + `), then route it:
 
   1. run the IdP:      git clone https://` + idpRepo + ` && cd devedge-idp && go run ./cmd/idp
-  2. sync its clients: de idp clients sync --out ./idp-clients.json
+  2. sync its clients: de idp clients sync --out ./idp-clients.yaml
   3. route it:         de idp up
 
 The browser then reaches the IdP at https://` + defaultIDPHost + `/.`,
@@ -373,7 +373,7 @@ The browser then reaches the IdP at https://` + defaultIDPHost + `/.`,
 
 // idpNewCmd is `de idp new` — deliberately thin. The full OIDC provider is the
 // devedge-idp repo's job; this prints guidance and, with --emit, drops a starter
-// devedge.yaml + sample idp-clients.json so the wiring is obvious.
+// devedge.yaml + sample idp-clients.yaml so the wiring is obvious.
 func idpNewCmd() *cobra.Command {
 	var dir string
 	var emit bool
@@ -392,7 +392,7 @@ CLI's job is discovery/registration around it:
   de idp up             route the IdP through the edge at ` + defaultIDPHost + `
 
 With --emit, a starter devedge.yaml (routing ` + defaultIDPHost + ` -> :` + fmt.Sprint(defaultIDPPort) + `) and a
-sample idp-clients.json are written into --dir so the file shapes are concrete.`,
+sample idp-clients.yaml are written into --dir so the file shapes are concrete.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := cmd.OutOrStdout()
@@ -402,10 +402,10 @@ sample idp-clients.json are written into --dir so the file shapes are concrete.`
 			fmt.Fprintf(w, "  cd devedge-idp && go run ./cmd/idp    %s\n\n", colorLabel.Sprintf("# serves on :%d", defaultIDPPort))
 			fmt.Fprintf(w, "Then wire it into the edge from your project:\n")
 			fmt.Fprintf(w, "  de idp up                     %s\n", colorLabel.Sprintf("# route %s -> the IdP", defaultIDPHost))
-			fmt.Fprintf(w, "  de idp clients sync           %s\n", colorLabel.Sprint("# discover apps -> idp-clients.json"))
+			fmt.Fprintf(w, "  de idp clients sync           %s\n", colorLabel.Sprint("# discover apps -> idp-clients.yaml"))
 
 			if !emit {
-				fmt.Fprintf(w, "\n%s pass --emit to write a starter devedge.yaml + sample idp-clients.json\n", colorLabel.Sprint("tip:"))
+				fmt.Fprintf(w, "\n%s pass --emit to write a starter devedge.yaml + sample idp-clients.yaml\n", colorLabel.Sprint("tip:"))
 				return nil
 			}
 
@@ -416,13 +416,12 @@ sample idp-clients.json are written into --dir so the file shapes are concrete.`
 			if err := os.WriteFile(cfgPath, []byte(starterIDPConfig), 0o644); err != nil {
 				return fmt.Errorf("write %s: %w", cfgPath, err)
 			}
-			sample, err := json.MarshalIndent([]idpClient{
+			sample, err := yaml.Marshal([]idpClient{
 				synthClient("orders", types.Route{Host: "orders.app.dev.test", Project: "orders"}),
-			}, "", "  ")
+			})
 			if err != nil {
 				return err
 			}
-			sample = append(sample, '\n')
 			samplePath := filepath.Join(dir, defaultClientsFile)
 			if err := os.WriteFile(samplePath, sample, 0o644); err != nil {
 				return fmt.Errorf("write %s: %w", samplePath, err)
@@ -434,7 +433,7 @@ sample idp-clients.json are written into --dir so the file shapes are concrete.`
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", ".", "directory to write starter files into (with --emit)")
-	cmd.Flags().BoolVar(&emit, "emit", false, "also write a starter devedge.yaml + sample idp-clients.json")
+	cmd.Flags().BoolVar(&emit, "emit", false, "also write a starter devedge.yaml + sample idp-clients.yaml")
 	return cmd
 }
 

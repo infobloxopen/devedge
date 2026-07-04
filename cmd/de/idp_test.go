@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"testing"
@@ -183,7 +184,7 @@ spec:
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := filepath.Join(dir, "idp-clients.json")
+	out := filepath.Join(dir, "idp-clients.yaml")
 
 	if _, err := runIDP(t, "clients", "sync", "--config", cfg, "--out", out); err != nil {
 		t.Fatalf("sync: %v", err)
@@ -194,7 +195,7 @@ spec:
 	}
 
 	var clients []idpClient
-	if err := json.Unmarshal(first, &clients); err != nil {
+	if err := yaml.Unmarshal(first, &clients); err != nil {
 		t.Fatalf("decode out: %v", err)
 	}
 	var got *idpClient
@@ -236,16 +237,16 @@ func TestIDPNew_Emit(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "devedge.yaml")); err != nil {
 		t.Errorf("starter devedge.yaml not written: %v", err)
 	}
-	sample := filepath.Join(dir, "idp-clients.json")
+	sample := filepath.Join(dir, "idp-clients.yaml")
 	data, err := os.ReadFile(sample)
 	if err != nil {
-		t.Fatalf("sample idp-clients.json not written: %v", err)
+		t.Fatalf("sample idp-clients.yaml not written: %v", err)
 	}
 	var clients []idpClient
-	if err := json.Unmarshal(data, &clients); err != nil {
-		t.Errorf("sample idp-clients.json is not valid: %v", err)
+	if err := yaml.Unmarshal(data, &clients); err != nil {
+		t.Errorf("sample idp-clients.yaml is not valid: %v", err)
 	}
 	if len(clients) == 0 {
-		t.Errorf("sample idp-clients.json is empty; output:\n%s", out)
+		t.Errorf("sample idp-clients.yaml is empty; output:\n%s", out)
 	}
 }
