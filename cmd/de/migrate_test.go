@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,5 +272,63 @@ func TestRunMigrateNew_4digitAndNoLockTimeout(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "0003_another_change.up.sql")); err != nil {
 		t.Fatalf("expected 0003_another_change.up.sql: %v", err)
+	}
+}
+
+// TestMigrateCLI_DSNRedactedOnStderr is the SEC-005 regression test at the CLI
+// egress boundary: `de migrate up` with a scheme-less DSN (as libpq
+// keyword/value via DATABASE_URL, or as a //user:pass@host URL via --dsn)
+// must never print the cleartext password to stderr, and must still print an
+// actionable "Error: ..." line (SilenceErrors + our own hand-redacted print,
+// not a silently swallowed failure).
+func TestMigrateCLI_DSNRedactedOnStderr(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "0001_init.up.sql", "SELECT 1;")
+	writeFile(t, dir, "0001_init.down.sql", "SELECT 1;")
+
+	cases := []struct {
+		name   string
+		args   []string
+		env    map[string]string
+		secret string
+	}{
+		{
+			name:   "dsn flag, URL userinfo password",
+			args:   []string{"migrate", "up", "--dir", dir, "--downstore", filepath.Join(t.TempDir(), "downstore"), "--dsn", "//dbadmin:Hunter2Pw@10.0.0.5:5432/prod"},
+			secret: "Hunter2Pw",
+		},
+		{
+			name:   "DATABASE_URL, libpq keyword/value password",
+			args:   []string{"migrate", "up", "--dir", dir, "--downstore", filepath.Join(t.TempDir(), "downstore")},
+			env:    map[string]string{"DATABASE_URL": "host=db.internal port=5432 user=admin password=SuperSecret123 dbname=prod sslmode=require"},
+			secret: "SuperSecret123",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			for k, v := range c.env {
+				t.Setenv(k, v)
+			}
+			root := rootCmd()
+			var buf bytes.Buffer
+			root.SetOut(&buf)
+			root.SetErr(&buf)
+			root.SetArgs(c.args)
+			err := root.Execute()
+			if err == nil {
+				t.Fatalf("expected an error (scheme-less DSN); output: %s", buf.String())
+			}
+			out := buf.String()
+			if strings.Contains(out, c.secret) {
+				t.Fatalf("cleartext password %q leaked to output: %s", c.secret, out)
+			}
+			if strings.Contains(out, "password=") && !strings.Contains(out, "password=xxxxx") {
+				t.Fatalf("an unredacted password= token reached output: %s", out)
+			}
+			if !strings.Contains(out, "Error:") {
+				t.Fatalf("expected a hand-printed \"Error:\" line despite SilenceErrors, got: %s", out)
+			}
+		})
 	}
 }

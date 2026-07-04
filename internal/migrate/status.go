@@ -9,6 +9,8 @@ import (
 	"time"
 
 	migratelib "github.com/golang-migrate/migrate/v4"
+
+	dsnutil "github.com/infobloxopen/devedge/internal/dsn"
 )
 
 // StatusResult reports where a database sits relative to the migrations on disk.
@@ -68,7 +70,9 @@ func WithConnTimeouts(dsn string, lock, statement time.Duration) (string, error)
 	}
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return "", fmt.Errorf("parse database DSN: %w", err)
+		// SEC-005: never wrap the raw dsn (or the *url.Error verbatim, whose
+		// Error() text embeds it) into the returned error.
+		return "", fmt.Errorf("parse database DSN %s: %w", dsnutil.Redact(dsn), unwrapURLErr(err))
 	}
 	q := u.Query()
 	var opts []string

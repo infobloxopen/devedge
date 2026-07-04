@@ -60,10 +60,38 @@ Near-zero-downtime rules (enforced/encoded here):
 	)
 	// A migrate failure (lint violations, dirty schema, ...) is already an
 	// actionable message; don't bury it under a usage dump.
+	//
+	// SilenceErrors is also set (SEC-005): cobra's default error printer would
+	// otherwise print the RunE error verbatim, and up/status/verify's errors
+	// can originate from a DSN parse failure. The underlying sinks
+	// (internal/migrate) already redact any DSN before formatting an error,
+	// but we redact again here — belt-and-suspenders at the CLI egress
+	// boundary — and print it ourselves so the operator still sees a useful
+	// message.
 	for _, sub := range cmd.Commands() {
 		sub.SilenceUsage = true
+		sub.SilenceErrors = true
+		wrapRunEWithRedactedErr(sub)
 	}
 	return cmd
+}
+
+// wrapRunEWithRedactedErr wraps cmd's RunE (if any) so that, on error, a
+// redacted message is printed to stderr before the error is returned. Used
+// together with SilenceErrors so cobra's own (non-redacting) error printer
+// never runs (SEC-005).
+func wrapRunEWithRedactedErr(cmd *cobra.Command) {
+	if cmd.RunE == nil {
+		return
+	}
+	inner := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		err := inner(cmd, args)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", dsn.ScrubText(err.Error()))
+		}
+		return err
+	}
 }
 
 // migrateOpts is the shared flag set for the migrate subcommands.

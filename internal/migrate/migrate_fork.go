@@ -13,6 +13,8 @@ import (
 	"time"
 
 	migratelib "github.com/golang-migrate/migrate/v4"
+
+	dsnutil "github.com/infobloxopen/devedge/internal/dsn"
 )
 
 // defaultMigrateTimeout bounds a single Migrate call when the caller's context carries
@@ -222,13 +224,17 @@ func countApplied(dir string, from, to uint) (int, error) {
 func toPgxURL(dsn string) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return "", fmt.Errorf("parse database DSN: %w", err)
+		// SEC-005: never format the raw dsn (or wrap the *url.Error verbatim —
+		// its Error() text embeds the raw dsn too) into the returned error.
+		return "", fmt.Errorf("parse database DSN %s: %w", dsnutil.Redact(dsn), unwrapURLErr(err))
 	}
 	switch u.Scheme {
 	case "postgres", "postgresql", "pgx", "pgx5":
 		u.Scheme = "pgx5"
 	case "":
-		return "", fmt.Errorf("database DSN %q has no scheme (expected postgres://...)", dsn)
+		// SEC-005: redact rather than %q the raw dsn — a scheme-less DSN is
+		// commonly a libpq keyword/value string carrying a cleartext password.
+		return "", fmt.Errorf("database DSN %s has no scheme (expected postgres://...)", dsnutil.Redact(dsn))
 	default:
 		return "", fmt.Errorf("unsupported database DSN scheme %q (expected a postgres DSN)", u.Scheme)
 	}
@@ -241,4 +247,17 @@ func toPgxURL(dsn string) (string, error) {
 		u.RawQuery = q.Encode()
 	}
 	return u.String(), nil
+}
+
+// unwrapURLErr returns a safe-to-format error for a url.Parse failure. A
+// *url.Error's own Error() text embeds the original (unredacted) input
+// string, so this unwraps to url.Error.Err — the parse-failure reason alone
+// (e.g. "net/url: invalid control character in URL") — instead of surfacing
+// that text (SEC-005).
+func unwrapURLErr(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return uerr.Err
+	}
+	return err
 }
