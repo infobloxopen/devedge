@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	dsnutil "github.com/infobloxopen/devedge/internal/dsn"
 )
 
 // seedMarkerTable is the devedge-owned bookkeeping table that records which seed has been
@@ -117,7 +119,9 @@ func readSeed(path string) (sqlText, fingerprint string, err error) {
 func pqDSN(dsn string) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return "", fmt.Errorf("seed: parse dsn: %w", err)
+		// SEC-005: never wrap the raw dsn (or the *url.Error verbatim, whose
+		// Error() text embeds it) into the returned error.
+		return "", fmt.Errorf("seed: parse dsn %s: %w", dsnutil.Redact(dsn), unwrapURLErr(err))
 	}
 	q := u.Query()
 	if q.Get("sslmode") == "" {
