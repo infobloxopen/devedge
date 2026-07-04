@@ -186,6 +186,11 @@ type RegisterRequest struct {
 	Project     string `json:"project,omitempty"`
 	Owner       string `json:"owner,omitempty"`
 	TTL         string `json:"ttl,omitempty"`
+	// Tile is optional launchpad-presentation metadata (WS-026). Carried through
+	// so a tile declared in devedge.yaml / kind:Shell survives registration and is
+	// readable via GET /v1/routes by `de idp clients sync`. Nil for routes that
+	// declare none, preserving the existing request shape.
+	Tile *types.Tile `json:"tile,omitempty"`
 }
 
 func (a *API) listRoutes(w http.ResponseWriter, r *http.Request) {
@@ -232,6 +237,7 @@ func (a *API) registerRoute(w http.ResponseWriter, r *http.Request) {
 		Project:     req.Project,
 		Owner:       req.Owner,
 		Source:      "api",
+		Tile:        req.Tile,
 	}
 
 	if req.TTL != "" {

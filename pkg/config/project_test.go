@@ -185,3 +185,65 @@ func TestToRoutes(t *testing.T) {
 		t.Errorf("TTL = %v", routes[0].TTL)
 	}
 }
+
+// TestParseProject_NoTile_BackwardCompat proves a devedge.yaml with no tile
+// metadata still parses (tile nil) and maps to routes with no tile — the tile
+// addition to RouteEntry is backward-compatible.
+func TestParseProject_NoTile_BackwardCompat(t *testing.T) {
+	input := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Config
+metadata:
+  name: foo
+spec:
+  routes:
+    - host: web.foo.dev.test
+      upstream: http://127.0.0.1:3000
+`)
+	cfg, err := ParseProject(input)
+	if err != nil {
+		t.Fatalf("ParseProject: %v", err)
+	}
+	if cfg.Spec.Routes[0].Tile != nil {
+		t.Errorf("Routes[0].Tile = %+v, want nil", cfg.Spec.Routes[0].Tile)
+	}
+	routes, err := cfg.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	if routes[0].Tile != nil {
+		t.Errorf("route Tile = %+v, want nil", routes[0].Tile)
+	}
+}
+
+// TestParseProject_Tile proves a tile-annotated route parses and the tile flows
+// through ToRoutes onto the domain Route.
+func TestParseProject_Tile(t *testing.T) {
+	input := []byte(`apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Config
+metadata:
+  name: orders
+spec:
+  routes:
+    - host: orders.app.dev.test
+      upstream: http://127.0.0.1:3000
+      tile:
+        displayName: Orders
+        description: Manage orders
+        launchURL: https://orders.app.dev.test/
+`)
+	cfg, err := ParseProject(input)
+	if err != nil {
+		t.Fatalf("ParseProject: %v", err)
+	}
+	entry := cfg.Spec.Routes[0]
+	if entry.Tile == nil || entry.Tile.DisplayName != "Orders" {
+		t.Fatalf("Routes[0].Tile = %+v, want DisplayName=Orders", entry.Tile)
+	}
+	routes, err := cfg.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	if routes[0].Tile == nil || routes[0].Tile.LaunchURL != "https://orders.app.dev.test/" {
+		t.Fatalf("route Tile = %+v, want the declared tile", routes[0].Tile)
+	}
+}

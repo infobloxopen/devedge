@@ -64,6 +64,12 @@ type ShellSpec struct {
 	API ShellAPI `yaml:"api"`
 	// UFEs are the micro-frontends composed into the shell. Non-empty.
 	UFEs []ShellUFE `yaml:"ufes"`
+	// Tile is optional launchpad-presentation metadata for the shell as a whole
+	// (WS-026). The shell IS the app, so this is the app's single launchpad tile:
+	// when set, ToRoutes attaches it to the shell's catch-all route, and
+	// `de idp clients sync` renders the app as an Okta-style tile. Absent by
+	// default, so existing kind:Shell documents parse and render identically.
+	Tile *types.Tile `yaml:"tile,omitempty"`
 }
 
 // ShellCDN declares the simulated CDN host for uFE bundles.
@@ -277,12 +283,15 @@ func (s *Shell) ToRoutes() ([]types.Route, error) {
 	proj := s.Metadata.Name
 	routes := make([]types.Route, 0, 1+len(s.Spec.API.Services)+len(s.Spec.UFEs)+1)
 
-	// Shell catch-all: path-less route on the shell host.
+	// Shell catch-all: path-less route on the shell host. The optional shell-level
+	// launchpad tile rides on this route (the app's front door), so a discovery
+	// pass over the routes finds one tile per app on its catch-all.
 	routes = append(routes, types.Route{
 		Host:     s.Spec.Host,
 		Upstream: s.Spec.ShellUpstream,
 		Project:  proj,
 		Source:   "project-file",
+		Tile:     s.Spec.Tile,
 	})
 
 	// API routes.

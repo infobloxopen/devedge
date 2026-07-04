@@ -34,10 +34,10 @@ const (
 // ProjectConfig represents a devedge.yaml project file following the
 // Kubernetes resource API structure.
 type ProjectConfig struct {
-	APIVersion string          `yaml:"apiVersion"`
-	Kind       string          `yaml:"kind"`
-	Metadata   ObjectMeta      `yaml:"metadata"`
-	Spec       ProjectSpec     `yaml:"spec"`
+	APIVersion string      `yaml:"apiVersion"`
+	Kind       string      `yaml:"kind"`
+	Metadata   ObjectMeta  `yaml:"metadata"`
+	Spec       ProjectSpec `yaml:"spec"`
 }
 
 // ObjectMeta follows the Kubernetes metadata convention.
@@ -79,6 +79,10 @@ type RouteEntry struct {
 	StripPrefix bool           `yaml:"stripPrefix,omitempty"` // trim path before forwarding
 	Mode        string         `yaml:"mode,omitempty"`
 	Readiness   *ReadinessSpec `yaml:"readiness,omitempty"` // optional health probe (010)
+	// Tile is optional launchpad-presentation metadata (WS-026). When set, the
+	// app is rendered as a tile in the dev IdP launchpad. Absent by default, so
+	// existing project files parse and register identically.
+	Tile *types.Tile `yaml:"tile,omitempty"`
 }
 
 // LoadProject reads and parses a devedge.yaml file.
@@ -142,6 +146,7 @@ func (c *ProjectConfig) ToRoutes() ([]types.Route, error) {
 			Project:     c.Metadata.Name,
 			Source:      "project-file",
 			TTL:         ttl,
+			Tile:        entry.Tile,
 		})
 	}
 	return routes, nil

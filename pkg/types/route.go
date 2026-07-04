@@ -56,6 +56,13 @@ type Route struct {
 	// Project groups routes for bulk lifecycle operations.
 	Project string `json:"project,omitempty"`
 
+	// Tile is optional launchpad-presentation metadata (WS-026). When set, the
+	// dev IdP launchpad renders this app as an Okta-style tile, and
+	// `de idp clients sync` reads it when synthesizing the app's client entry.
+	// Nil for routes that opt out — which is every route by default, so existing
+	// routes parse and behave identically.
+	Tile *Tile `json:"tile,omitempty"`
+
 	// Source identifies how the route was registered (cli, project-file,
 	// docker, k3d-adapter).
 	Source string `json:"source,omitempty"`
@@ -71,6 +78,24 @@ type Route struct {
 
 	// RenewedAt is when the lease was last renewed.
 	RenewedAt time.Time `json:"renewed_at"`
+}
+
+// Tile is optional launchpad-presentation metadata for an app (WS-026). When an
+// app declares it, the dev IdP launchpad renders the app as an Okta-style tile.
+// Every field is optional; a route or shell with no Tile behaves exactly as
+// before. The JSON tags carry it over the daemon API (/v1/routes); the YAML tags
+// let an app declare it in devedge.yaml or a kind:Shell document.
+type Tile struct {
+	// DisplayName is the tile's human label. When empty, `de idp clients sync`
+	// falls back to a title-cased app name.
+	DisplayName string `json:"display_name,omitempty" yaml:"displayName,omitempty"`
+	// Description is an optional short blurb shown under the tile.
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	// IconURL is an optional icon shown on the tile.
+	IconURL string `json:"icon_url,omitempty" yaml:"iconURL,omitempty"`
+	// LaunchURL is where the tile opens. When empty, it defaults to the app's
+	// root (https://<host>/).
+	LaunchURL string `json:"launch_url,omitempty" yaml:"launchURL,omitempty"`
 }
 
 // EffectiveProtocol returns the route's protocol, defaulting to HTTP.

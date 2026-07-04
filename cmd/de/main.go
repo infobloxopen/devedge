@@ -59,6 +59,7 @@ func rootCmd() *cobra.Command {
 		inspectCmd(),
 		newCmd(),
 		ufeCmd(),
+		idpCmd(),
 		cliCmd(),
 		terraformCmd(),
 		projectCmd(),
@@ -192,6 +193,7 @@ func renewCmd() *cobra.Command {
 				Project:     route.Project,
 				Owner:       route.Owner,
 				TTL:         route.TTL.String(),
+				Tile:        route.Tile,
 			})
 			if err != nil {
 				return err

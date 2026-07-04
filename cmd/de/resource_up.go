@@ -139,6 +139,7 @@ func runResourceUp(cmd *cobra.Command, res config.Resource, file, envOverride st
 			Project:     r.Project,
 			Owner:       "project-file",
 			TTL:         r.TTL.String(),
+			Tile:        r.Tile,
 		}
 		if err := c.Register(context.Background(), req); err != nil {
 			return fmt.Errorf("register %s: %w", r.Host, err)

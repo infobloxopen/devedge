@@ -679,3 +679,86 @@ func TestMarshalShell_RoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch: %+v vs %+v", s2.Spec, s.Spec)
 	}
 }
+
+// TestParseShell_NoTile_BackwardCompat proves a kind:Shell document with no tile
+// metadata still parses (the field is absent/nil) and behaves identically — the
+// tile addition is backward-compatible.
+func TestParseShell_NoTile_BackwardCompat(t *testing.T) {
+	s, err := ParseShell([]byte(validShellMethod1))
+	if err != nil {
+		t.Fatalf("ParseShell: %v", err)
+	}
+	if s.Spec.Tile != nil {
+		t.Errorf("Spec.Tile = %+v, want nil for a shell that declares none", s.Spec.Tile)
+	}
+	routes, err := s.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	// The shell catch-all is the first route; with no shell tile it stays nil.
+	if routes[0].Tile != nil {
+		t.Errorf("catch-all route Tile = %+v, want nil", routes[0].Tile)
+	}
+}
+
+// TestParseShell_Tile_RoundTrip proves a tile-annotated shell parses, exposes the
+// tile, attaches it to the catch-all route in ToRoutes, and survives a marshal
+// round-trip.
+func TestParseShell_Tile_RoundTrip(t *testing.T) {
+	input := `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Shell
+metadata:
+  name: notesapp
+spec:
+  host: notesapp.dev.test
+  shellUpstream: http://127.0.0.1:4200
+  cdn:
+    host: cdn.dev.test
+  api:
+    method: 1
+    upstream: http://127.0.0.1:8080
+  tile:
+    displayName: Notes
+    description: Take notes
+    iconURL: https://cdn.dev.test/icons/notes.svg
+    launchURL: https://notesapp.dev.test/home
+  ufes:
+    - id: notes-ufe
+      route: notes
+      upstream: http://127.0.0.1:4201
+`
+	s, err := ParseShell([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseShell: %v", err)
+	}
+	if s.Spec.Tile == nil || s.Spec.Tile.DisplayName != "Notes" {
+		t.Fatalf("Spec.Tile = %+v, want DisplayName=Notes", s.Spec.Tile)
+	}
+	if s.Spec.Tile.LaunchURL != "https://notesapp.dev.test/home" {
+		t.Errorf("Tile.LaunchURL = %q", s.Spec.Tile.LaunchURL)
+	}
+
+	routes, err := s.ToRoutes()
+	if err != nil {
+		t.Fatalf("ToRoutes: %v", err)
+	}
+	// The catch-all (path-less, shell host) route carries the tile.
+	if routes[0].Path != "" || routes[0].Host != "notesapp.dev.test" {
+		t.Fatalf("routes[0] = %+v, want the shell catch-all", routes[0])
+	}
+	if routes[0].Tile == nil || routes[0].Tile.DisplayName != "Notes" {
+		t.Fatalf("catch-all route Tile = %+v, want the shell tile", routes[0].Tile)
+	}
+
+	data, err := MarshalShell(s)
+	if err != nil {
+		t.Fatalf("MarshalShell: %v", err)
+	}
+	s2, err := ParseShell(data)
+	if err != nil {
+		t.Fatalf("ParseShell round-trip: %v", err)
+	}
+	if s2.Spec.Tile == nil || *s2.Spec.Tile != *s.Spec.Tile {
+		t.Errorf("round-trip tile mismatch: %+v vs %+v", s2.Spec.Tile, s.Spec.Tile)
+	}
+}
