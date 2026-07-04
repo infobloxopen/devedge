@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-07-04
+
+### Fixed
+
+- `de idp` help text (WS-026 DX hardening, findings 097/099/103): `de idp up` and
+  `de idp new --emit` now point at `go run ./cmd/idp` instead of a non-existent
+  `make run` target, and `de idp clients sync --help` states plainly that `--out` is
+  a full replace from the current discovery (run with the daemon up so every
+  registered app is included) instead of the ambiguous "merge/replace". These fixes
+  were authored after v0.14.0 was tagged and shipped only in this patch.
+
 ## [0.14.0] - 2026-07-04
 
 Adds the `de idp` verb group + app tile metadata (WS-026 dev security suite) and
