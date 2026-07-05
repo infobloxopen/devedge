@@ -227,6 +227,53 @@ spec:
 	}
 }
 
+// TestSLOLint_FailOnWarn proves --fail-on-warn / --strict turns the un-calibrated
+// (warn-only) findings on a fresh scaffold into a non-zero exit, while default
+// lint stays green (#61).
+func TestSLOLint_FailOnWarn(t *testing.T) {
+	dir := writeSLOFixture(t)
+	if _, err := runDe(t, "slo", "generate", "-C", dir); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	sloPath := filepath.Join(dir, "slo.yaml")
+
+	// Default lint: warns only, exit 0.
+	if out, err := runDe(t, "slo", "lint", sloPath); err != nil {
+		t.Fatalf("default lint should exit 0 on fresh scaffold, got err %v\n%s", err, out)
+	}
+
+	// --fail-on-warn: the same warnings now fail.
+	out, err := runDe(t, "slo", "lint", "--fail-on-warn", sloPath)
+	if err == nil {
+		t.Fatalf("--fail-on-warn must exit non-zero when warnings are present:\n%s", out)
+	}
+	// --strict is an alias with the same effect.
+	if _, serr := runDe(t, "slo", "lint", "--strict", sloPath); serr == nil {
+		t.Fatal("--strict must exit non-zero when warnings are present")
+	}
+}
+
+// TestSLOGenerate_NoGenerateFailsLoud proves --no-generate does NOT run
+// 'de generate' and fails loud with the actionable hint when the OpenAPI is
+// missing right after scaffold (#62). (The default auto-generate path drives the
+// full pinned buf toolchain and is exercised by the SDK scaffold e2e, not here.)
+func TestSLOGenerate_NoGenerateFailsLoud(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "buf.gen.yaml"), "version: v2\ninputs:\n  - directory: proto\n")
+	mustWrite(t, filepath.Join(dir, "proto", "orders", "v1", "orders.proto"), `syntax = "proto3";
+package orders.v1;
+service OrderService { rpc GetOrder(GetOrderRequest) returns (Order); }
+message GetOrderRequest {} message Order {}
+`)
+	out, err := runDe(t, "slo", "generate", "-C", dir, "--no-generate")
+	if err == nil {
+		t.Fatalf("--no-generate with no OpenAPI must fail loud, got success:\n%s", out)
+	}
+	if !strings.Contains(out, "de generate") {
+		t.Errorf("error should point at 'de generate', got:\n%s", out)
+	}
+}
+
 // TestSLOCheck queries a stubbed Prometheus API and reports the current ratio.
 // It also asserts the built query is service-scoped (carries rpc_service), i.e.
 // `check` measures the same series the derived SLIs define.

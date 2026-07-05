@@ -68,6 +68,7 @@ burn-rate rules. See the define-slo skill for authoring guidance.`,
 // service's enriched OpenAPI, scoped to its gRPC service FQN.
 func sloGenerateCmd() *cobra.Command {
 	var dir, openapiPath, service, out string
+	var noGenerate bool
 	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Derive default OpenSLO SLOs from the service's enriched OpenAPI",
@@ -79,6 +80,10 @@ Run with no flags from a service project: the OpenAPI is located at
 openapi/<svc>.openapi.yaml (produced by 'de generate') and the gRPC service FQN
 is derived from the project's .proto files.
 
+Right after a scaffold the intermediate OpenAPI is not on disk yet, so this runs
+'de generate' first to produce it (pass --no-generate to skip that and fail loud
+if it is missing). Give an explicit --openapi to derive from a spec elsewhere.
+
 The FQN (proto package + service name, e.g. orders.v1.OrderService) becomes the
 rpc.service label on every derived SLI. The OpenAPI does not carry it, so without
 it the SLIs would aggregate across services. If the FQN cannot be determined,
@@ -87,6 +92,20 @@ this fails loud — pass --service to set it explicitly.`,
 			d, err := resolveProjectDir(dir)
 			if err != nil {
 				return err
+			}
+
+			// #62: right after a scaffold the enriched OpenAPI is not on disk yet
+			// (the scaffold ran the derivation but did not leave the intermediate).
+			// When no --openapi was given and none exists but the project can produce
+			// one (it has a buf config), run 'de generate' first so the fresh-scaffold
+			// path succeeds instead of erroring. --no-generate opts out.
+			if openapiPath == "" && !noGenerate {
+				if matches, _ := filepath.Glob(filepath.Join(d, "openapi", "*.openapi.yaml")); len(matches) == 0 && hasBufConfig(d) {
+					fmt.Fprintln(cmd.OutOrStdout(), "no openapi/*.openapi.yaml yet — running 'de generate' first")
+					if gerr := runGenerate(cmd, d); gerr != nil {
+						return fmt.Errorf("de generate (needed to produce the OpenAPI for SLO derivation): %w", gerr)
+					}
+				}
 			}
 
 			// Locate the enriched OpenAPI (standard path openapi/<svc>.openapi.yaml).
@@ -121,6 +140,7 @@ this fails loud — pass --service to set it explicitly.`,
 	cmd.Flags().StringVar(&openapiPath, "openapi", "", "enriched OpenAPI YAML (default: the single openapi/*.openapi.yaml)")
 	cmd.Flags().StringVar(&service, "service", "", "rpc.service label (proto FQN, e.g. orders.v1.OrderService); derived from protos when unset")
 	cmd.Flags().StringVar(&out, "out", "slo.yaml", "output path (- for stdout)")
+	cmd.Flags().BoolVar(&noGenerate, "no-generate", false, "do not run 'de generate' when the OpenAPI is missing; fail loud instead")
 	return cmd
 }
 
@@ -145,6 +165,7 @@ func writeSLODoc(w io.Writer, outPath string, b []byte, doc *slo.Document, fqn s
 // sloLintCmd is `de slo lint`: validate OpenSLO docs and run the classifier.
 func sloLintCmd() *cobra.Command {
 	var format string
+	var failOnWarn, strict bool
 	cmd := &cobra.Command{
 		Use:   "lint [files...]",
 		Short: "Validate OpenSLO docs and run the fail-loud three-layer classifier",
@@ -152,8 +173,13 @@ func sloLintCmd() *cobra.Command {
 
 The classifier REJECTS a category error (e.g. a Layer-0 saturation signal such
 as cpu/memory/queue-depth declared as an SLI, or an SLO with no error-budget
-policy) with an error-severity finding, and WARNS on an un-calibrated default.
-Any error-severity finding exits non-zero.
+policy) with an error-severity finding, and WARNS on an un-calibrated default or
+a placeholder error-budget policy. Any error-severity finding exits non-zero;
+warnings alone exit 0 so a fresh scaffold's slo.yaml lints green.
+
+Pass --fail-on-warn (alias --strict) to exit non-zero on ANY finding, including
+warnings — a production CI gate that refuses to promote un-calibrated SLOs or a
+placeholder error-budget policy.
 
 With no file argument it lints slo.yaml in the current directory.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -186,10 +212,17 @@ With no file argument it lints slo.yaml in the current directory.`,
 			if all.HasError() {
 				return fmt.Errorf("lint failed: %d error-severity finding(s)", sloCountErrors(all))
 			}
+			// --fail-on-warn / --strict: a CI gate fails on ANY finding, so
+			// un-calibrated or placeholder-policy SLOs cannot be promoted.
+			if (failOnWarn || strict) && len(all) > 0 {
+				return fmt.Errorf("lint failed (--fail-on-warn): %d finding(s) including warnings; calibrate the SLOs (de slo check) and replace placeholder policies to pass", len(all))
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text|json")
+	cmd.Flags().BoolVar(&failOnWarn, "fail-on-warn", false, "exit non-zero on ANY finding, including warnings (a strict production CI gate)")
+	cmd.Flags().BoolVar(&strict, "strict", false, "alias for --fail-on-warn")
 	return cmd
 }
 
