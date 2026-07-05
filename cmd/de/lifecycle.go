@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -10,7 +13,55 @@ import (
 	"github.com/infobloxopen/devedge/internal/dns"
 	"github.com/infobloxopen/devedge/internal/makefrag"
 	"github.com/infobloxopen/devedge/internal/platform"
+	"github.com/infobloxopen/devedge/internal/version"
 )
+
+// daemonBuild queries the running daemon's reported build (#56). running is false
+// when no daemon answers (not running, or a build too old to report a version).
+func daemonBuild(ctx context.Context) (running bool, ver, commit string) {
+	st, err := newClient().Status(ctx)
+	if err != nil {
+		return false, "", ""
+	}
+	ver, _ = st["version"].(string)
+	commit, _ = st["commit"].(string)
+	return true, ver, commit
+}
+
+// sameDaemonBuild reports whether a running daemon's reported build matches this
+// client's build. An empty version/commit (a daemon predating the /v1/status
+// version field) never matches — it is treated as skew so `de start` replaces it.
+func sameDaemonBuild(ver, commit string) bool {
+	if ver == "" && commit == "" {
+		return false
+	}
+	return ver == version.Version && commit == version.Commit
+}
+
+// daemonBuildLabel formats a daemon's reported build like version.String(),
+// tolerating the empty fields an old daemon reports.
+func daemonBuildLabel(ver, commit string) string {
+	if ver == "" && commit == "" {
+		return "an older build (no version reported)"
+	}
+	return fmt.Sprintf("devedge %s (%s)", ver, commit)
+}
+
+// warnDaemonSkew prints a best-effort warning when the running daemon is a
+// different build than this client (#56). It is the diagnosis for the "route
+// clobber": a stale daemon predating a routing change mis-registers routes with
+// no other signal. Silent when no daemon is running or the builds match.
+func warnDaemonSkew(out io.Writer) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	running, ver, commit := daemonBuild(ctx)
+	if !running || sameDaemonBuild(ver, commit) {
+		return
+	}
+	fmt.Fprintf(out, "%s the running devedged is %s but this client is %s.\n",
+		colorWarning.Sprint("daemon version skew:"), daemonBuildLabel(ver, commit), version.String())
+	fmt.Fprintln(out, "  a stale daemon can mis-register routes silently — run 'de start' to replace it.")
+}
 
 func installCmd() *cobra.Command {
 	return &cobra.Command{
@@ -64,18 +115,52 @@ func installCmd() *cobra.Command {
 }
 
 func startCmd() *cobra.Command {
-	return &cobra.Command{
+	var noReplace bool
+	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the devedge daemon",
+		Long: `Start the devedge daemon.
+
+If a daemon of a DIFFERENT build is already running — version skew after a client
+upgrade, the cause of silent route mis-registration (#56) — 'de start' replaces it
+(stop + start) so the running binary matches this client. Pass --no-replace to
+only warn and leave the stale daemon running.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
 			adapter := platform.Detect()
+
+			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
+			running, dver, dcommit := daemonBuild(ctx)
+			cancel()
+
+			if running {
+				if sameDaemonBuild(dver, dcommit) {
+					fmt.Fprintf(out, "devedged already running (%s); up to date\n", version.String())
+					return nil
+				}
+				fmt.Fprintf(out, "%s running %s, this client is %s\n",
+					colorWarning.Sprint("daemon version skew:"), daemonBuildLabel(dver, dcommit), version.String())
+				if noReplace {
+					fmt.Fprintln(out, "leaving the stale daemon running (--no-replace); it may mis-register routes. Run 'de start' to replace it.")
+					return nil
+				}
+				fmt.Fprint(out, "replacing stale daemon... ")
+				if err := adapter.Stop(); err != nil {
+					colorWarning.Fprintf(out, "stop failed: %v (continuing)\n", err)
+				} else {
+					colorSuccess.Fprintln(out, "stopped")
+				}
+			}
+
 			if err := adapter.Start(); err != nil {
 				return fmt.Errorf("start daemon: %w", err)
 			}
-			fmt.Println("devedged started")
+			fmt.Fprintln(out, "devedged started")
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&noReplace, "no-replace", false, "on daemon version skew, only warn; do not stop+start to replace the running daemon")
+	return cmd
 }
 
 func stopCmd() *cobra.Command {

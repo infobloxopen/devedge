@@ -39,6 +39,10 @@ func runResourceUp(cmd *cobra.Command, res config.Resource, file, envOverride st
 
 	c := newClient()
 
+	// Warn if the running daemon is a different build than this client (#56): a
+	// stale daemon can mis-register routes (drop Path) with no other signal.
+	warnDaemonSkew(out)
+
 	// Resolve the target cluster from the environment (FR-001/009) and report
 	// where this resource lands (FR-003). Resolution is always done (even for a
 	// no-deps resource) so the placement is observable; the cluster is only
