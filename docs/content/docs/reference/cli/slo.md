@@ -76,6 +76,10 @@ Run with no flags from a service project: the OpenAPI is located at
 openapi/<svc>.openapi.yaml (produced by 'de generate') and the gRPC service FQN
 is derived from the project's .proto files.
 
+Right after a scaffold the intermediate OpenAPI is not on disk yet, so this runs
+'de generate' first to produce it (pass --no-generate to skip that and fail loud
+if it is missing). Give an explicit --openapi to derive from a spec elsewhere.
+
 The FQN (proto package + service name, e.g. orders.v1.OrderService) becomes the
 rpc.service label on every derived SLI. The OpenAPI does not carry it, so without
 it the SLIs would aggregate across services. If the FQN cannot be determined,
@@ -87,6 +91,7 @@ Usage:
 Flags:
   -C, --dir string       service project directory (default: current directory)
   -h, --help             help for generate
+      --no-generate      do not run 'de generate' when the OpenAPI is missing; fail loud instead
       --openapi string   enriched OpenAPI YAML (default: the single openapi/*.openapi.yaml)
       --out string       output path (- for stdout) (default "slo.yaml")
       --service string   rpc.service label (proto FQN, e.g. orders.v1.OrderService); derived from protos when unset
@@ -111,8 +116,13 @@ Validate one or more OpenSLO docs and run the WS-025 three-layer classifier.
 
 The classifier REJECTS a category error (e.g. a Layer-0 saturation signal such
 as cpu/memory/queue-depth declared as an SLI, or an SLO with no error-budget
-policy) with an error-severity finding, and WARNS on an un-calibrated default.
-Any error-severity finding exits non-zero.
+policy) with an error-severity finding, and WARNS on an un-calibrated default or
+a placeholder error-budget policy. Any error-severity finding exits non-zero;
+warnings alone exit 0 so a fresh scaffold's slo.yaml lints green.
+
+Pass --fail-on-warn (alias --strict) to exit non-zero on ANY finding, including
+warnings — a production CI gate that refuses to promote un-calibrated SLOs or a
+placeholder error-budget policy.
 
 With no file argument it lints slo.yaml in the current directory.
 
@@ -120,8 +130,10 @@ Usage:
   de slo lint [files...] [flags]
 
 Flags:
+      --fail-on-warn    exit non-zero on ANY finding, including warnings (a strict production CI gate)
       --format string   output format: text|json (default "text")
   -h, --help            help for lint
+      --strict          alias for --fail-on-warn
 ```
 
 ### `de slo render`
