@@ -199,6 +199,13 @@ func TestStatus(t *testing.T) {
 	if resp["status"] != "running" {
 		t.Errorf("status = %v", resp["status"])
 	}
+	// #56: the daemon reports its build so `de status`/`de start` can detect skew.
+	if _, ok := resp["version"]; !ok {
+		t.Errorf("status missing version field: %v", resp)
+	}
+	if _, ok := resp["commit"]; !ok {
+		t.Errorf("status missing commit field: %v", resp)
+	}
 }
 
 func TestRegister_validation(t *testing.T) {

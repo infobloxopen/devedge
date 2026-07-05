@@ -101,8 +101,17 @@ func TestGenerate_MainGoShape(t *testing.T) {
 		// WS-012 finding 079: the composed host builds each member over one shared
 		// DB via NewModule(db) — NOT a zero-arg Module().
 		".NewModule(db),",
-		".Models()...)",
-		"gorm.Open(sqlite.Open(dsn)",
+		".Models(),",
+		// #64: engine=postgres branches the dialector on DSN scheme and adds the
+		// Postgres driver + helpers (no longer a hardcoded sqlite.Open).
+		"gorm.Open(dialectorFor(dsn)",
+		`"gorm.io/driver/postgres"`,
+		"postgres.Open(dsn)",
+		"func isPostgresDSN(dsn string) bool",
+		// #64: models are routed to each module's OWN namespace, not the union.
+		"modelsByModule := map[string][]any{",
+		"modules[0].Descriptor().ID:",
+		"DomainModels:     modelsByModule[ns.ModuleID],",
 		"gormtx.MigrateModule(",
 		`GRPCAddr:`,
 		`":9090"`,
@@ -146,10 +155,83 @@ func TestGenerate_GoModShape(t *testing.T) {
 		gormtxModule + " " + DefaultSDKVersion,
 		"github.com/acme/orders/module v0.4.1",
 		"github.com/acme/billing/module v0.7.0",
+		// #64: engine=postgres adds the GORM Postgres driver require.
+		postgresDriverModule + " " + postgresDriverVersion,
 	} {
 		if !strings.Contains(gen.GoMod, want) {
 			t.Errorf("generated go.mod missing %q\n---\n%s", want, gen.GoMod)
 		}
+	}
+}
+
+// TestGenerate_SQLiteWhenNoPostgres verifies the SQLite dev path when the
+// composition declares no Postgres engine: the dialector is the plain sqlite.Open
+// (no scheme branch), no Postgres driver is imported or required, and the models
+// are still routed per module (#64).
+func TestGenerate_SQLiteWhenNoPostgres(t *testing.T) {
+	doc := `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Composition
+metadata: { name: suite }
+spec:
+  runtime: { grpc: ":9090", http: ":8080" }
+  modules:
+    - { name: orders, module: github.com/acme/orders/module@v0.4.1 }
+    - { name: billing, module: github.com/acme/billing/module@v0.7.0 }
+`
+	c := mustComposition(t, doc)
+	gen, err := Generate(c, "1.26.0", "example.com/suite/cmd/suite", GenerateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"gorm.Open(sqlite.Open(dsn)",
+		"modelsByModule := map[string][]any{",
+		"DomainModels:     modelsByModule[ns.ModuleID],",
+	} {
+		if !strings.Contains(gen.MainGo, want) {
+			t.Errorf("generated main.go missing %q\n---\n%s", want, gen.MainGo)
+		}
+	}
+	for _, unwanted := range []string{
+		"gorm.io/driver/postgres",
+		"dialectorFor(",
+		"postgres.Open(",
+	} {
+		if strings.Contains(gen.MainGo, unwanted) {
+			t.Errorf("SQLite composition must not reference %q\n---\n%s", unwanted, gen.MainGo)
+		}
+	}
+	if strings.Contains(gen.GoMod, postgresDriverModule) {
+		t.Errorf("SQLite composition go.mod must not require %q\n---\n%s", postgresDriverModule, gen.GoMod)
+	}
+	// A default DSN env var is derived from the project name when none is declared.
+	if !strings.Contains(gen.MainGo, `os.Getenv("SUITE_DSN")`) {
+		t.Errorf("expected default DSN env var SUITE_DSN\n---\n%s", gen.MainGo)
+	}
+}
+
+// TestGenerate_DSNRefHonored verifies the declared database.dsnRef becomes the
+// env var the generated host reads (not the hardcoded <NAME>_DSN) (#64).
+func TestGenerate_DSNRefHonored(t *testing.T) {
+	doc := `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Composition
+metadata: { name: control-plane }
+spec:
+  runtime: { grpc: ":9090" }
+  database: { engine: postgres, dsnRef: DATABASE_URL, isolation: schema-preferred }
+  modules:
+    - { name: orders, module: github.com/acme/orders/module@v0.4.1 }
+`
+	c := mustComposition(t, doc)
+	gen, err := Generate(c, "1.26.0", "example.com/x", GenerateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gen.MainGo, `os.Getenv("DATABASE_URL")`) {
+		t.Errorf("expected declared dsnRef DATABASE_URL to be read\n---\n%s", gen.MainGo)
+	}
+	if strings.Contains(gen.MainGo, "CONTROL_PLANE_DSN") {
+		t.Errorf("declared dsnRef should override the default <NAME>_DSN\n---\n%s", gen.MainGo)
 	}
 }
 

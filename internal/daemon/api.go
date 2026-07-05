@@ -13,6 +13,7 @@ import (
 	"github.com/infobloxopen/devedge/internal/cluster"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/registry"
+	"github.com/infobloxopen/devedge/internal/version"
 	"github.com/infobloxopen/devedge/pkg/types"
 )
 
@@ -304,6 +305,11 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	st := map[string]any{
 		"status": "running",
 		"routes": len(routes),
+		// The running daemon's build (#56). `de status` shows it and `de start`
+		// compares it against the client build to catch version skew — the stale
+		// daemon that silently mis-registers routes after a client upgrade.
+		"version": version.Version,
+		"commit":  version.Commit,
 	}
 	if tls := a.tlsStatus(); tls != nil {
 		st["tls"] = tls

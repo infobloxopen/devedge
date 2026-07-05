@@ -31,9 +31,15 @@ rather than duplicating logic. Link to the constitution for the "why".
 
 | Skill | Use when |
 |-------|----------|
+| `new-service` | Bootstrapping a new service **as a consumer** of devedge-sdk from a tiny prompt ("build a `<X>` service with devedge") |
 | `run-tests` | Running unit / integration / e2e tests |
 | `build-run` | Compiling and manually smoke-testing |
 | `verify-change` | The QA gate after implementing a feature |
+
+`new-service` is consumer-facing (it drives `de new service` to scaffold a service
+built *on* devedge); the others are maintainer-facing (working *on* the devedge
+repo itself). See the ["Use with Claude Code"](../../docs/content/docs/getting-started/use-with-claude-code.md)
+getting-started page for how a developer discovers and runs `new-service`.
 
 ## Adding a skill
 

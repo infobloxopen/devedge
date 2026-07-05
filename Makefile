@@ -14,7 +14,7 @@ BINDIR   := $(DESTDIR)$(PREFIX)
 
 BINS     := de devedged devedge-dns-webhook
 
-.PHONY: all build test lint lint-api-paths clean install help docs-cli
+.PHONY: all build test lint lint-api-paths clean install help docs-cli docs-cli-check
 .DEFAULT_GOAL := help
 
 ##@ Development
@@ -41,6 +41,15 @@ lint-api-paths: ## Reject the version-after-resource URL anti-pattern in protos
 
 docs-cli: ## Regenerate the CLI reference pages under docs/ from de --help
 	bash hack/gen-cli-docs.sh
+
+docs-cli-check: docs-cli ## Fail if the generated CLI reference pages are stale vs the de command set
+	@if ! git diff --quiet -- docs/content/docs/reference/cli; then \
+		echo "error: CLI reference pages are stale vs the 'de' command set."; \
+		echo "run 'make docs-cli' and commit docs/content/docs/reference/cli."; \
+		git --no-pager diff --stat -- docs/content/docs/reference/cli; \
+		exit 1; \
+	fi
+	@echo "CLI reference pages are up to date."
 
 ##@ Installation
 
