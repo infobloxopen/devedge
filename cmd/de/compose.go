@@ -147,6 +147,15 @@ devedge-sdk pin is derived from the member's own go.mod.`,
 			}
 			if name == "" {
 				name = lastPathSegment(importPath)
+				// devedge-sdk scaffolds expose their importable unit at <repo>/module
+				// (package "module"), so the last path segment is "module" for EVERY
+				// member and collides on the second add. Fall back to the module-root
+				// segment (the repo name, e.g. "warehoused"). (DX run 27, finding 118)
+				if name == "module" {
+					if root := lastPathSegment(strings.TrimSuffix(importPath, "/module")); root != "" {
+						name = root
+					}
+				}
 			}
 			for _, m := range comp.Spec.Modules {
 				if m.Name == name {
@@ -300,6 +309,14 @@ SDK + toolchain. No Go plugins — the modules are imported, not loaded.`,
 				fmt.Fprintf(out, "  %s %s\n", colorLabel.Sprint("wrote"), filepath.Join(dir, fn))
 			}
 			fmt.Fprintf(out, "next: %s\n", colorLabel.Sprintf("cd %s && go mod tidy && go build", dir))
+			// Fail loud on a declared-vs-generated engine mismatch: the generated host
+			// hardcodes the SQLite dialector and adds no postgres driver, so a declared
+			// postgres/schema-preferred composition is INERT and would crash cryptically
+			// against a real DSN. Surface it at build instead of silently (DX run 27, 119).
+			if db := comp.Spec.Database; db != nil && db.Engine != "" && !strings.EqualFold(db.Engine, "sqlite") {
+				fmt.Fprintf(out, "%s composition declares database.engine=%q, but `de compose build` generates a SQLite-only host (the dialector is not branched and no %s driver is added), so the declared engine/isolation is inert — do NOT rely on multi-schema isolation from this build. Postgres composition is not yet generated.\n",
+					colorError.Sprint("WARNING:"), db.Engine, db.Engine)
+			}
 			return nil
 		},
 	}
