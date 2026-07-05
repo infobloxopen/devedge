@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-07-04
+
+### Fixed
+
+- `de version` no longer reports `devedge dev (unknown)` for a binary built
+  outside goreleaser. When the linker-injected version is absent (a plain
+  `go install`/`go build`), it now falls back to `runtime/debug.ReadBuildInfo()`,
+  reporting the module version (e.g. from `go install .../cmd/de@vX.Y.Z`) and the
+  VCS revision. The ldflags value remains the primary source for release builds.
+  A top-level `de --version` flag was added, reporting the same string as
+  `de version` (parity with `devedge-sdk --version`). (#66)
+
 ## [0.15.0] - 2026-07-04
 
 ### Added
