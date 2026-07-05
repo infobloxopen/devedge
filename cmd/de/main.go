@@ -43,7 +43,11 @@ func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "de",
 		Short: "Devedge — local development edge router",
+		// Enable a top-level `de --version` flag reporting the same string as the
+		// `de version` subcommand (parity with `devedge-sdk --version`).
+		Version: version.String(),
 	}
+	root.SetVersionTemplate("{{.Version}}\n")
 
 	root.AddCommand(
 		versionCmd(),
