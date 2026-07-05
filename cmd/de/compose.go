@@ -15,6 +15,23 @@ import (
 	"github.com/infobloxopen/devedge/pkg/config"
 )
 
+// envVarPrefix turns a composition name into the environment-variable-safe DSN
+// prefix the generated host reads (upper-cased, non-alphanumerics to "_"),
+// matching the compose generator's own default. Used only to describe the DSN env
+// var in `de compose build` output.
+func envVarPrefix(name string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r - 32
+		case (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+			return r
+		default:
+			return '_'
+		}
+	}, name)
+}
+
 // composeCmd is `de compose`, the WS-012 Phase 4 surface: turn a `kind:
 // Composition` file into a STATIC composed-suite binary built on devedge-sdk's
 // servicekit host. The generated cmd/<name>/main.go IMPORTS the member modules
@@ -309,13 +326,24 @@ SDK + toolchain. No Go plugins — the modules are imported, not loaded.`,
 				fmt.Fprintf(out, "  %s %s\n", colorLabel.Sprint("wrote"), filepath.Join(dir, fn))
 			}
 			fmt.Fprintf(out, "next: %s\n", colorLabel.Sprintf("cd %s && go mod tidy && go build", dir))
-			// Fail loud on a declared-vs-generated engine mismatch: the generated host
-			// hardcodes the SQLite dialector and adds no postgres driver, so a declared
-			// postgres/schema-preferred composition is INERT and would crash cryptically
-			// against a real DSN. Surface it at build instead of silently (DX run 27, 119).
-			if db := comp.Spec.Database; db != nil && db.Engine != "" && !strings.EqualFold(db.Engine, "sqlite") {
-				fmt.Fprintf(out, "%s composition declares database.engine=%q, but `de compose build` generates a SQLite-only host (the dialector is not branched and no %s driver is added), so the declared engine/isolation is inert — do NOT rely on multi-schema isolation from this build. Postgres composition is not yet generated.\n",
-					colorError.Sprint("WARNING:"), db.Engine, db.Engine)
+			// Report the generated database posture (#64). A declared postgres engine
+			// now generates a scheme-branched dialector + the postgres driver + PER-MODULE
+			// schema-scoped migration, so schema-preferred isolation holds. Any other
+			// non-sqlite engine is not yet generated and falls back to the SQLite dev path,
+			// which we still surface loudly (the residual of DX run 27, finding 119 / #63).
+			if db := comp.Spec.Database; db != nil && db.Engine != "" {
+				dsnRef := db.DSNRef
+				if dsnRef == "" {
+					dsnRef = envVarPrefix(comp.Project()) + "_DSN"
+				}
+				switch {
+				case strings.EqualFold(db.Engine, "postgres"):
+					fmt.Fprintf(out, "%s database.engine=postgres: a postgres:// DSN in %s uses the Postgres driver, and each module migrates into its own schema (schema-preferred isolation). An empty DSN falls back to in-memory SQLite for dev.\n",
+						colorLabel.Sprint("database:"), colorHost.Sprint(dsnRef))
+				case !strings.EqualFold(db.Engine, "sqlite"):
+					fmt.Fprintf(out, "%s composition declares database.engine=%q, which `de compose build` does not yet generate — the host falls back to the SQLite dev path, so the declared engine/isolation is inert. Use engine: postgres for a real multi-schema host.\n",
+						colorError.Sprint("WARNING:"), db.Engine)
+				}
 			}
 			return nil
 		},
