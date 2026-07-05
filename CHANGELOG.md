@@ -6,6 +6,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-04
+
+### Added
+
+- `de slo lint --fail-on-warn` (alias `--strict`) exits non-zero on ANY finding,
+  including warnings, so a production CI gate can refuse to promote un-calibrated
+  or placeholder-policy SLOs. Default `de slo lint` still exits 0 on a fresh
+  scaffold's warnings. (#61)
+- `de status`/`/v1/status` now report the running daemon's build (`version` +
+  `commit`), and `de start` detects a running daemon of a **different** build
+  (version skew after a client upgrade) and replaces it (stop + start), with
+  `--no-replace` to only warn. `de project up` prints a best-effort skew warning
+  before registering routes. This kills the recurring "route clobber" where a
+  stale daemon silently mis-registers routes. (#56)
+- A discoverable Claude Code skill, `new-service`, that bootstraps a service on
+  devedge from a one-line prompt (pin the SDK version → `de new service` → model
+  the resource → generate → build → run → round-trip). Ships a "Use with Claude
+  Code" getting-started page and a root `AGENTS.md` pointer. Marketplace/plugin
+  packaging is a follow-up. (#14)
+
+### Changed
+
+- `de compose build` now generates a **real Postgres host** when the composition
+  declares `database.engine: postgres`: the dialector branches on the DSN scheme
+  (a `postgres://`/`postgresql://` DSN uses the Postgres driver, an empty DSN
+  falls back to in-memory SQLite for dev), the declared `dsnRef` env var is read
+  (not a hardcoded `<NAME>_DSN`), and `gorm.io/driver/postgres` is added to the
+  generated `go.mod`. Each module's migration is now scoped to its **own**
+  namespace (models routed by the module's descriptor ID, not the global union),
+  so `schema-preferred` isolation actually isolates. The build warning from #63
+  is now shown only for engines that are still ungenerated. (#64)
+- `de slo generate` runs `de generate` automatically when the enriched OpenAPI is
+  missing but the project can produce it (a fresh scaffold), instead of erroring;
+  `--no-generate` opts out and fails loud. (#62)
+
+### CI
+
+- `make docs-cli-check` regenerates the CLI reference pages and fails if they are
+  stale versus the `de` command set; CI runs it so the reference docs cannot drift.
+  All reference pages were regenerated wholesale. (#44)
+
 ## [0.14.3] - 2026-07-04
 
 ### Changed
