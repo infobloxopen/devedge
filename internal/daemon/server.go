@@ -13,10 +13,12 @@ import (
 	"github.com/infobloxopen/devedge/internal/certs"
 	"github.com/infobloxopen/devedge/internal/depruntime"
 	"github.com/infobloxopen/devedge/internal/dnsserver"
+	"github.com/infobloxopen/devedge/internal/edgeip"
 	"github.com/infobloxopen/devedge/internal/proxy"
 	"github.com/infobloxopen/devedge/internal/reconciler"
 	"github.com/infobloxopen/devedge/internal/registry"
 	"github.com/infobloxopen/devedge/internal/render"
+	"github.com/infobloxopen/devedge/pkg/types"
 )
 
 // devedgeDir returns the base directory for all devedge state.
@@ -241,11 +243,28 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Start embedded reverse proxy on EdgeIP (127.0.0.2:80/443).
 	if s.manageTraefik {
+		// Ensure the EdgeIP is routable before the proxy tries to bind it. On
+		// macOS 127.0.0.2 is not reachable until added as a lo0 alias, and the
+		// alias does not survive a reboot — so re-ensure it on every startup
+		// (the daemon runs as root under launchd, which is what this needs).
+		// Without it, net.Listen("tcp","127.0.0.2:443") fails and NO host serves.
+		if added, err := edgeip.EnsureAlias(types.EdgeIP); err != nil {
+			s.logger.Error("edge loopback alias unavailable — the proxy cannot bind and no host will serve",
+				"ip", types.EdgeIP, "err", err,
+				"hint", "the daemon must run as root to add the loopback alias; run 'sudo de install' then 'de start'")
+		} else if added {
+			s.logger.Info("added edge loopback alias", "ip", types.EdgeIP)
+		}
+
 		p := proxy.New(s.reg, certPair, s.logger)
 		s.api.SetTLSStatus(proxyTLSStatus(p))
 		go func() {
 			if err := p.Run(ctx); err != nil {
-				s.logger.Error("proxy failed", "err", err)
+				// A bind failure here means the edge is dead while the daemon
+				// keeps running — surface it loudly with the usual cause.
+				s.logger.Error("edge proxy failed — no host will serve on the edge",
+					"ip", types.EdgeIP, "err", err,
+					"hint", "check that "+types.EdgeIP+" is routable (loopback alias) and the daemon runs as root; 'de doctor' checks the edge")
 			}
 		}()
 	}

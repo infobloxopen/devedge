@@ -52,8 +52,8 @@ func RunDoctor() []CheckResult {
 	results = append(results, checkMkcertCA())
 	results = append(results, checkDaemonSocket())
 	results = append(results, checkProxyTLS(daemon.DefaultSocketPath()))
-	results = append(results, checkPort(80))
-	results = append(results, checkPort(443))
+	results = append(results, checkEdgeIP())
+	results = append(results, checkEdgeListening())
 	results = append(results, checkDNSEndpoint())
 	results = append(results, checkDNS())
 	results = append(results, checkResolverConfig())
@@ -102,6 +102,54 @@ func checkPort(port int) CheckResult {
 	}
 	ln.Close()
 	return CheckResult{name, true, "available"}
+}
+
+// checkEdgeIP verifies the EdgeIP (127.0.0.2) is routable — i.e. the loopback
+// alias exists. It binds an ephemeral port on the EdgeIP (needs no privilege,
+// does not conflict with the running edge proxy on :443). If the alias is
+// missing, net.Listen fails with "can't assign requested address" and the edge
+// proxy cannot bind, so nothing serves. This replaces the old checkPort(80/443)
+// which reported a FREE port as "available" — i.e. passed precisely when the
+// edge was down.
+func checkEdgeIP() CheckResult { return checkEdgeIPFor(types.EdgeIP) }
+
+func checkEdgeIPFor(ip string) CheckResult {
+	name := "edge IP " + ip
+	ln, err := net.Listen("tcp", net.JoinHostPort(ip, "0"))
+	if err != nil {
+		if strings.Contains(err.Error(), "assign requested address") {
+			return CheckResult{name, false, fmt.Sprintf(
+				"%s not routable — loopback alias missing; run 'sudo de install' then 'de start' (the daemon adds it as root), or 'sudo ifconfig lo0 alias %s'",
+				ip, ip)}
+		}
+		// Some other error (e.g. transient) — can't conclude the alias is missing.
+		return CheckResult{name, true, fmt.Sprintf("assumed routable (%v)", err)}
+	}
+	ln.Close()
+	return CheckResult{name, true, fmt.Sprintf("%s routable (loopback alias present)", ip)}
+}
+
+// checkEdgeListening verifies something is actually listening on the EdgeIP's
+// :443 — i.e. the edge proxy is up and serving. A daemon can report "running"
+// while its proxy failed to bind (the error is logged, not fatal), so this is
+// the check that catches a dead edge behind a live daemon.
+func checkEdgeListening() CheckResult {
+	return checkEdgeListeningFor(net.JoinHostPort(types.EdgeIP, "443"))
+}
+
+func checkEdgeListeningFor(addr string) CheckResult {
+	const name = "edge proxy :443"
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		if strings.Contains(err.Error(), "assign requested address") {
+			return CheckResult{name, false, fmt.Sprintf(
+				"%s not routable (loopback alias missing) — see the edge IP check", addr)}
+		}
+		return CheckResult{name, false, fmt.Sprintf(
+			"nothing listening on %s — daemon stopped or the edge proxy failed to bind (check devedged logs): %v", addr, err)}
+	}
+	conn.Close()
+	return CheckResult{name, true, fmt.Sprintf("listening on %s", addr)}
 }
 
 // checkDNSEndpoint sends a synthetic A query directly to the DNS
