@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-07-09
+
+### Fixed
+
+- The local edge now comes up reliably (#70). The in-process edge proxy binds the
+  dedicated loopback address `127.0.0.2` (`EdgeIP`), but on macOS that address is
+  not routable until it is added as a `lo0` alias, and the alias does not survive
+  a reboot — and nothing in devedge ever created it. So after a reboot the proxy's
+  listen failed on every start and the edge silently served nothing
+  (`curl https://<app>.dev.test` → connection refused) while `de status` still
+  reported "running". The daemon now ensures the loopback alias before the proxy
+  binds (it runs as root under launchd, so it can, and re-applies it after a
+  reboot), and a proxy bind failure is logged loudly with its cause instead of
+  being swallowed in a goroutine.
+- `de doctor` now detects a down edge (#70). The old `port 80`/`port 443` checks
+  reported a *free* port as "available" — i.e. passed precisely when the edge was
+  not serving — and never tested `127.0.0.2`. They are replaced by an `edge IP`
+  check (is `127.0.0.2` routable / the loopback alias present) and an
+  `edge proxy :443` check (is anything actually listening), each naming the cause
+  and the remedy.
+- `de start`/`de stop` now require root and use the modern `launchctl bootstrap
+  system` / `bootout system/<label>` verbs (#70). Previously they ran the
+  deprecated `launchctl load`/`unload` of a system LaunchDaemon without requiring
+  root, which loaded the daemon into the user domain running unprivileged — unable
+  to add the loopback alias, bind the edge, or write `/etc/hosts`. They now fail
+  loudly ("run sudo de start") instead of silently starting a broken daemon.
+
 ## [0.15.1] - 2026-07-04
 
 ### Fixed
