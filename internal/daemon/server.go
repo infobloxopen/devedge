@@ -251,7 +251,7 @@ func (s *Server) Run(ctx context.Context) error {
 		if added, err := edgeip.EnsureAlias(types.EdgeIP); err != nil {
 			s.logger.Error("edge loopback alias unavailable — the proxy cannot bind and no host will serve",
 				"ip", types.EdgeIP, "err", err,
-				"hint", "the daemon must run as root to add the loopback alias; run 'sudo de install' then 'de start'")
+				"hint", "the daemon must run as root to add the loopback alias; run 'sudo de install' then 'sudo de start'")
 		} else if added {
 			s.logger.Info("added edge loopback alias", "ip", types.EdgeIP)
 		}

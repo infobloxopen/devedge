@@ -119,7 +119,7 @@ func checkEdgeIPFor(ip string) CheckResult {
 	if err != nil {
 		if strings.Contains(err.Error(), "assign requested address") {
 			return CheckResult{name, false, fmt.Sprintf(
-				"%s not routable — loopback alias missing; run 'sudo de install' then 'de start' (the daemon adds it as root), or 'sudo ifconfig lo0 alias %s'",
+				"%s not routable — loopback alias missing; run 'sudo de install' then 'sudo de start' (the daemon adds it as root), or 'sudo ifconfig lo0 alias %s'",
 				ip, ip)}
 		}
 		// Some other error (e.g. transient) — can't conclude the alias is missing.
