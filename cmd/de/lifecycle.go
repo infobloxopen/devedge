@@ -108,7 +108,7 @@ func installCmd() *cobra.Command {
 			}
 			colorSuccess.Println("OK")
 
-			fmt.Printf("\n%s\n", colorSuccess.Sprint("Installation complete.")+colorLabel.Sprint(" Run 'de start' to start the daemon."))
+			fmt.Printf("\n%s\n", colorSuccess.Sprint("Installation complete.")+colorLabel.Sprint(" Run 'sudo de start' to start the daemon."))
 			return nil
 		},
 	}

@@ -174,12 +174,22 @@ func (d *DarwinAdapter) Start() error {
 	if _, err := os.Stat(launchDaemonPath); os.IsNotExist(err) {
 		return fmt.Errorf("service not installed; run 'sudo de install' first")
 	}
-	out, err := exec.Command("launchctl", "load", launchDaemonPath).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("launchctl load: %w — %s", err, strings.TrimSpace(string(out)))
+	// A system LaunchDaemon must be bootstrapped as root to run as root — the
+	// daemon needs root to bind the privileged edge ports and add the loopback
+	// alias. Loading it as a normal user (the old `launchctl load` behavior)
+	// silently produced an unprivileged daemon that could do neither.
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("starting the daemon requires root (it binds the edge on :80/:443 and adds the loopback alias); run 'sudo de start'")
 	}
-	if s := strings.TrimSpace(string(out)); strings.Contains(s, "Load failed") || strings.Contains(s, ": error") {
-		return fmt.Errorf("launchctl load: %s", s)
+	// `bootstrap system` is the modern replacement for the deprecated
+	// `launchctl load`; RunAtLoad in the plist starts it immediately, as root.
+	out, err := exec.Command("launchctl", "bootstrap", "system", launchDaemonPath).CombinedOutput()
+	if err != nil {
+		// Idempotent: already bootstrapped is success.
+		if d.loaded() {
+			return nil
+		}
+		return fmt.Errorf("launchctl bootstrap system %s: %w — %s", launchDaemonPath, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -188,11 +198,27 @@ func (d *DarwinAdapter) Stop() error {
 	if _, err := os.Stat(launchDaemonPath); os.IsNotExist(err) {
 		return fmt.Errorf("service not installed; run 'sudo de install' first")
 	}
-	out, err := exec.Command("launchctl", "unload", launchDaemonPath).CombinedOutput()
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("stopping the daemon requires root; run 'sudo de stop'")
+	}
+	// `bootout system/<label>` is the modern replacement for `launchctl unload`.
+	out, err := exec.Command("launchctl", "bootout", "system/"+launchDaemonLabel).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("launchctl unload: %w — %s", err, strings.TrimSpace(string(out)))
+		s := strings.TrimSpace(string(out))
+		// Idempotent: a service that is not loaded is already stopped.
+		if strings.Contains(s, "No such process") || !d.loaded() {
+			return nil
+		}
+		return fmt.Errorf("launchctl bootout system/%s: %w — %s", launchDaemonLabel, err, s)
 	}
 	return nil
+}
+
+// loaded reports whether the LaunchDaemon is bootstrapped in the system domain.
+// `launchctl print system/<label>` exits non-zero when it is not; it needs
+// root, which the callers (Start/Stop) already require.
+func (d *DarwinAdapter) loaded() bool {
+	return exec.Command("launchctl", "print", "system/"+launchDaemonLabel).Run() == nil
 }
 
 func (d *DarwinAdapter) IsRunning() (bool, error) {
