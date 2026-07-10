@@ -147,8 +147,10 @@ func loadPresetManifest(name string) (PresetManifest, error) {
 
 // applyPreset renders the named built-in preset's overlay against data and
 // writes it into root, overriding any base file at the same path. The preset
-// must already have been validated to exist (checkPresetExists).
-func applyPreset(root, name string, data templateData) error {
+// must already have been validated to exist (checkPresetExists). data is the
+// template context the overlay is rendered against — a uFE templateData or a
+// shellData — the same value the base tree was rendered with (see overlayPreset).
+func applyPreset(root, name string, data any) error {
 	m, err := loadPresetManifest(name)
 	if err != nil {
 		return err
@@ -183,8 +185,10 @@ func PresetShellHost(presetDir string) string {
 
 // applyPresetDir loads <presetDir>/preset.json and applies its overlay onto the
 // generated project at root, reading source templates from the real filesystem
-// under presetDir. A missing/malformed preset.json fails loud.
-func applyPresetDir(root, presetDir string, data templateData) error {
+// under presetDir. A missing/malformed preset.json fails loud. data is the
+// template context the overlay is rendered against — a uFE templateData (from
+// Render) or a shellData (from RenderShell) — see overlayPreset.
+func applyPresetDir(root, presetDir string, data any) error {
 	manifestPath := filepath.Join(presetDir, "preset.json")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -207,14 +211,22 @@ func applyPresetDir(root, presetDir string, data templateData) error {
 // manifest's Template path) against data and writes it to the entry's Path
 // under root, overriding any base file. srcDesc names the preset source in
 // errors. Rendering happens fully in memory before any write.
-func overlayPreset(root string, m PresetManifest, srcDesc string, src func(rel string) ([]byte, error), data templateData) error {
+//
+// data is the same template context the base tree was rendered against (a uFE
+// templateData or a shellData). Path-placeholder substitution (__name__) applies
+// only to the uFE tree, so it is guarded to templateData — mirroring renderTree;
+// a shell overlay's paths are used verbatim.
+func overlayPreset(root string, m PresetManifest, srcDesc string, src func(rel string) ([]byte, error), data any) error {
 	var out []outFile
 	for _, f := range m.Files {
 		raw, err := src(f.Template)
 		if err != nil {
 			return fmt.Errorf("reading preset file %s (from %s): %w", f.Template, srcDesc, err)
 		}
-		dst := substitutePath(f.Path, data)
+		dst := f.Path
+		if td, ok := data.(templateData); ok {
+			dst = substitutePath(f.Path, td)
+		}
 		t, err := parsePresetTemplate(dst, string(raw))
 		if err != nil {
 			return err

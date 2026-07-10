@@ -32,6 +32,18 @@ type ShellParams struct {
 	Name string
 	// Roster is the parsed kind: Shell topology the shell is rendered from.
 	Roster *config.Shell
+	// Preset, when non-empty, names a BUILT-IN overlay applied on top of the
+	// base shell after it is rendered. The public CLI ships no proprietary
+	// built-in preset; an unknown preset is a clear error pointing at
+	// --preset-dir. Preset and PresetDir are mutually exclusive.
+	Preset string
+	// PresetDir, when non-empty, is a filesystem path to a preset directory
+	// holding a canonical preset.json (see PresetManifest). Its overlay is
+	// applied on top of the base shell — this is how the commercial shell
+	// preset (infoblox-cto-shell from the private repo: Okta session, PDS
+	// chrome, grouped INFOBLOX_GROUPS nav) is applied. The overlay is rendered
+	// against the shell's own template data (shellData).
+	PresetDir string
 }
 
 // shellData is what the shelltemplates/*.tmpl files see.
@@ -138,6 +150,16 @@ func RenderShell(p ShellParams) error {
 		p.ParentDir = "."
 	}
 
+	if p.Preset != "" && p.PresetDir != "" {
+		return fmt.Errorf("--preset and --preset-dir are mutually exclusive; pass one")
+	}
+	// A missing/unknown built-in preset must fail before we write anything.
+	if p.Preset != "" {
+		if err := checkPresetExists(p.Preset); err != nil {
+			return err
+		}
+	}
+
 	root := filepath.Join(p.ParentDir, p.Name)
 	preexisting, err := checkTarget(root)
 	if err != nil {
@@ -159,6 +181,23 @@ func RenderShell(p ShellParams) error {
 	}
 	if err := writeFiles(root, out, &wrote, cleanup); err != nil {
 		return err
+	}
+
+	// Apply the preset overlay on top of the base shell (add/override files),
+	// rendered against the shell's own template data. This mirrors Render so the
+	// overlay is covered by the same atomic-write/cleanup: a malformed preset or
+	// an overlay render error removes the partial shell.
+	switch {
+	case p.Preset != "":
+		if err := applyPreset(root, p.Preset, data); err != nil {
+			cleanup()
+			return err
+		}
+	case p.PresetDir != "":
+		if err := applyPresetDir(root, p.PresetDir, data); err != nil {
+			cleanup()
+			return err
+		}
 	}
 	return nil
 }

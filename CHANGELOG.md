@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-09
+
+### Added
+
+- **`de ufe override NAME --env <url> [--namespace @infoblox-csp]`** — the **`integrated <env>`** uFE run
+  mode, alongside `local` (the devedge shell loop). Serve your LOCAL uFE through the edge
+  (`https://<cdn>/<route>/main.js`, mkcert-trusted TLS + CORS) and print the exact browser
+  `import-map-overrides` snippet (`localStorage.setItem("import-map-override:<ns>/<module>", <bundle>)` +
+  the CSP `ufeOverride(<module>, <bundle>)` convenience + the clear forms) to inject that local bundle into
+  a LIVE hosted shell (e.g. a CSP env). The live-shell loop is pure browser-side import-map-overrides — no
+  proxy; the shell cross-origin-fetches the local `main.js` and mounts it, inheriting the shell-owned
+  session. `--namespace` keeps the CLI generic (a CSP env is just `--namespace @infoblox-csp`); `--dry-run`
+  prints without a daemon.
+- **`de ufe shell --preset | --preset-dir <path>`** — apply a preset overlay to a scaffolded shell, the
+  same mechanism `de ufe new` uses. The private `infoblox-cto-shell` preset (in
+  `Infoblox-CTO/devedge-ufe-sdk-internal`) uses this to turn the open shell into the Infoblox commercial
+  shell: Okta session + the **grouped INFOBLOX_GROUPS nav** + PDS chrome, replacing the open flat
+  "Applications" side-nav.
+
 ## [0.16.0] - 2026-07-09
 
 ### Added
