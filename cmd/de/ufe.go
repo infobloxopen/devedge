@@ -97,6 +97,10 @@ Examples:
 			if err != nil {
 				return err
 			}
+			if len(roster.Spec.UFEs) == 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s the roster lists no uFEs — the shell will render an empty menu; add one with 'de ufe new'.\n",
+					colorWarning.Sprint("warning:"))
+			}
 
 			if name == "" {
 				proj := roster.Project()
