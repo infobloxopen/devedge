@@ -211,15 +211,20 @@ type outFile struct {
 
 // renderTree walks fsys under base, substitutes path placeholders, renders any
 // .tmpl files against data, and returns the files in memory. Rendering fully
-// in memory first means a template error never leaves a partial project.
-func renderTree(fsys fs.FS, base string, data templateData) ([]outFile, error) {
+// in memory first means a template error never leaves a partial project. data
+// is the template context (a uFE templateData or a shellData); path-placeholder
+// substitution (__name__) applies only to the uFE tree, so it is guarded to the
+// uFE data type — the shell tree has no path placeholders.
+func renderTree(fsys fs.FS, base string, data any) ([]outFile, error) {
 	var out []outFile
 	err := fs.WalkDir(fsys, base, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 		rel := strings.TrimPrefix(path, base+"/")
-		rel = substitutePath(rel, data)
+		if td, ok := data.(templateData); ok {
+			rel = substitutePath(rel, td)
+		}
 
 		raw, err := fs.ReadFile(fsys, path)
 		if err != nil {

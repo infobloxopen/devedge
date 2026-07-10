@@ -21,7 +21,16 @@ import { AppModule } from './app/app.module';
 import { environment } from './environments/environment';
 
 // Tell webpack where this bundle's chunks live when loaded by the shell.
-setPublicPath('{{ .AppID }}');
+// setPublicPath() uses systemjs-webpack-interop and reads the SystemJS registry;
+// under the shell's native import() (no SystemJS) it throws. Guard it: the throw
+// would otherwise abort module execution before the single-spa lifecycles are
+// exported, so the uFE never mounts. This bundle inlines its chunks, so a
+// dynamic public path is not required on the native-import path.
+try {
+  setPublicPath('{{ .AppID }}');
+} catch {
+  // No SystemJS registry (native import() path) — safe to ignore.
+}
 
 if (environment.production) {
   enableProdMode();

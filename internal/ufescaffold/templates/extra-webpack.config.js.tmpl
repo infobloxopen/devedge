@@ -32,6 +32,11 @@ module.exports = (angularWebpackConfig, options) => {
   singleSpaConfig.devServer = {
     ...(singleSpaConfig.devServer || {}),
     port: {{ .DevPort }},
+    // The devedge edge proxies cdn.dev.test/<route>/* to this dev server with
+    // Host: cdn.dev.test; webpack-dev-server's host check must allow it or it
+    // returns "Invalid Host header" for every proxied bundle request (so the
+    // shell can't load the uFE). Allow all in local dev.
+    allowedHosts: 'all',
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': '*',

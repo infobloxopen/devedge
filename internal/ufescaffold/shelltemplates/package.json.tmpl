@@ -1,0 +1,21 @@
+{
+  "name": "{{ .Name }}",
+  "version": "0.1.0",
+  "description": "Generated single-spa root-config (shell) — native importmap + hash routing, wired to the devedge-ufe SDK.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npx --yes esbuild root-config.ts --bundle --format=esm --sourcemap --outfile=root-config.js",
+    "start": "npm run build && npx --yes sirv-cli . --port {{ .ShellPort }} --host 127.0.0.1 --dev"
+  },
+  "dependencies": {
+    "@infobloxopen/devedge-ufe-core": "{{ .Versions.SDK }}",
+    "@infobloxopen/devedge-ufe-angular": "{{ .Versions.SDK }}",
+    "@infobloxopen/devedge-ufe-single-spa": "{{ .Versions.SDK }}",
+    "@infobloxopen/devedge-ufe-oidc": "{{ .Versions.SDK }}",
+    "@infobloxopen/devedge-ufe-dev-loop": "{{ .Versions.SDK }}",
+    "single-spa": "^6.0.0",
+    "zone.js": "^0.12.0"
+  }
+}
