@@ -1,0 +1,30 @@
+/**
+ * Environment for the generated shell (root-config.ts imports this).
+ *
+ * Two things are configured here and nowhere else:
+ *
+ *  1. `useDevSession` — use a no-auth dev session so the shell renders locally
+ *     without an OIDC issuer. Set false (and run an issuer at `oidc.authority`)
+ *     to exercise real OIDC.
+ *  2. `oidc` — a GENERIC OIDC client config. Point `authority`/`clientId` at any
+ *     OIDC provider; nothing here is provider-specific.
+ */
+export const environment = {
+  production: false,
+
+  /**
+   * Use a no-auth dev session so the shell renders locally without an OIDC
+   * issuer. Set false (and run an issuer at `oidc.authority`) to exercise real
+   * OIDC.
+   */
+  useDevSession: true,
+
+  /** Generic OIDC config. Point `authority` at any OIDC issuer. */
+  oidc: {
+    authority: 'http://localhost:5556/dex',
+    clientId: '{{ .Name }}',
+    redirectUri: 'http://localhost:{{ .ShellPort }}/callback',
+    silentRedirectUri: 'http://localhost:{{ .ShellPort }}/silent-refresh',
+    scope: 'openid profile email offline_access',
+  },
+};

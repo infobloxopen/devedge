@@ -226,6 +226,91 @@ spec:
 	}
 }
 
+// seedShell is a minimal valid kind: Shell roster with one uFE, used by the
+// `de ufe shell` tests.
+const seedShell = `apiVersion: devedge.infoblox.dev/v1alpha1
+kind: Shell
+metadata:
+  name: notesapp
+spec:
+  host: notesapp.dev.test
+  shellUpstream: http://127.0.0.1:4200
+  cdn:
+    host: cdn.dev.test
+  api:
+    method: 1
+    prefix: /api
+    upstream: http://127.0.0.1:8080
+  ufes:
+    - id: notes
+      route: notes
+      upstream: http://127.0.0.1:4201
+`
+
+// TestUFEShell_ScaffoldsFromRoster verifies `de ufe shell` reads a roster and
+// scaffolds a runnable shell: it names the dir <roster>-shell by default,
+// renders root-config.ts with the roster uFE registered, and reports the host +
+// next steps (install/serve + de project up).
+func TestUFEShell_ScaffoldsFromRoster(t *testing.T) {
+	dir := t.TempDir()
+	shellFile := filepath.Join(dir, "shell.yaml")
+	if err := os.WriteFile(shellFile, []byte(seedShell), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runUFE(t, "shell", "--dir", dir, "--shell", shellFile)
+	if err != nil {
+		t.Fatalf("ufe shell: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "scaffolded shell") {
+		t.Errorf("output does not report scaffolding the shell:\n%s", out)
+	}
+	// Default name is <roster>-shell.
+	root := filepath.Join(dir, "notesapp-shell")
+	rc, rerr := os.ReadFile(filepath.Join(root, "root-config.ts"))
+	if rerr != nil {
+		t.Fatalf("shell root-config.ts not scaffolded: %v", rerr)
+	}
+	if !strings.Contains(string(rc), "loadMfe('notes', 'notes')") {
+		t.Errorf("root-config.ts missing loadMfe registration for notes:\n%s", rc)
+	}
+	// Next-steps hints: install/serve + route through the edge.
+	for _, want := range []string{"pnpm install", "pnpm start", "de project up -f " + shellFile, "notesapp.dev.test"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestUFEShell_MissingRosterErrors verifies a clear, actionable error when the
+// roster file is absent.
+func TestUFEShell_MissingRosterErrors(t *testing.T) {
+	dir := t.TempDir()
+	shellFile := filepath.Join(dir, "nope.yaml")
+	_, err := runUFE(t, "shell", "--dir", dir, "--shell", shellFile)
+	if err == nil {
+		t.Fatal("expected error for a missing roster, got nil")
+	}
+	if !strings.Contains(err.Error(), "de ufe new") {
+		t.Errorf("error should point at 'de ufe new':\n%v", err)
+	}
+}
+
+// TestUFEShell_NameOverride verifies --name overrides the default dir name.
+func TestUFEShell_NameOverride(t *testing.T) {
+	dir := t.TempDir()
+	shellFile := filepath.Join(dir, "shell.yaml")
+	if err := os.WriteFile(shellFile, []byte(seedShell), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runUFE(t, "shell", "--dir", dir, "--shell", shellFile, "--name", "custom-shell"); err != nil {
+		t.Fatalf("ufe shell --name: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "custom-shell", "package.json")); err != nil {
+		t.Errorf("--name did not set the shell dir: %v", err)
+	}
+}
+
 // TestUFENew_SkipRosterWiring verifies --shell "" scaffolds only, writing no
 // shell file and printing no roster/import-map output.
 func TestUFENew_SkipRosterWiring(t *testing.T) {

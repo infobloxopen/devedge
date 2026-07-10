@@ -49,6 +49,106 @@ func ufeCmd() *cobra.Command {
 		Short: "Scaffold and manage devedge micro-frontends (uFEs)",
 	}
 	cmd.AddCommand(ufeNewCmd())
+	cmd.AddCommand(ufeShellCmd())
+	return cmd
+}
+
+// ufeShellCmd is `de ufe shell` — it scaffolds a runnable single-spa SHELL
+// (root-config) from a `kind: Shell` roster (shell.yaml), so a developer can
+// render their uFE without copying the example shell. It reads the roster
+// (default shell.yaml), renders the embedded shell template tree over it, and
+// prints the next steps to install + serve the shell and route it through the
+// edge. It is the host-side companion of `de ufe new` (which scaffolds a uFE
+// and registers it into the roster).
+func ufeShellCmd() *cobra.Command {
+	var dir, shellFile, name string
+
+	cmd := &cobra.Command{
+		Use:   "shell",
+		Short: "Scaffold a runnable single-spa shell from a shell.yaml roster",
+		Long: `Scaffold a runnable single-spa SHELL (root-config) from a 'kind: Shell'
+roster (shell.yaml, as written by 'de ufe new').
+
+The generated shell is the host: it owns the session ONCE, registers every uFE
+in the roster by HASH route, loads each uFE's bundle through the browser's native
+importmap, and starts single-spa. It renders locally with a no-auth dev session
+(flip environment.useDevSession to exercise real OIDC). This is what lets a
+developer render their uFE without copying the example shell.
+
+The shell serves on the port in the roster's shellUpstream, so the served port
+matches the edge route 'de project up' creates to the shell host. Build + serve
+use npx (esbuild + sirv-cli), so no destructive install of a global toolchain is
+needed.
+
+Examples:
+  de ufe shell
+  de ufe shell --shell notesapp-shell.yaml --name notesapp-shell
+  de ufe shell --dir ./frontend`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			data, err := os.ReadFile(shellFile)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("shell roster %q not found — run 'de ufe new' first to create a shell roster, or pass --shell", shellFile)
+				}
+				return fmt.Errorf("read shell roster %q: %w", shellFile, err)
+			}
+			roster, err := config.ParseShell(data)
+			if err != nil {
+				return err
+			}
+			if len(roster.Spec.UFEs) == 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s the roster lists no uFEs — the shell will render an empty menu; add one with 'de ufe new'.\n",
+					colorWarning.Sprint("warning:"))
+			}
+
+			if name == "" {
+				proj := roster.Project()
+				if proj == "" {
+					proj = "app"
+				}
+				name = proj + "-shell"
+			}
+
+			if err := ufescaffold.RenderShell(ufescaffold.ShellParams{
+				ParentDir: dir,
+				Name:      name,
+				Roster:    roster,
+			}); err != nil {
+				return err
+			}
+
+			parent := dir
+			if parent == "" {
+				parent = "."
+			}
+			root := filepath.Join(parent, name)
+			port := ufescaffold.ShellServePort(roster)
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "\n%s %s\n", colorSuccess.Sprint("scaffolded shell"), colorHost.Sprint(name))
+			fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("host"), colorHost.Sprint(roster.Spec.Host))
+			fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("cdn"), colorHost.Sprint(roster.Spec.CDN.Host))
+			for _, u := range roster.Spec.UFEs {
+				fmt.Fprintf(out, "%s %s %s %s\n",
+					colorLabel.Sprint("uFE"),
+					colorHost.Sprint(u.ID),
+					colorLabel.Sprintf("#%s ->", u.Route),
+					colorHost.Sprintf("https://%s/%s/main.js", roster.Spec.CDN.Host, u.Route))
+			}
+
+			fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Next steps:"))
+			fmt.Fprintf(out, "  cd %s\n", root)
+			fmt.Fprintf(out, "  export GITHUB_TOKEN=...    %s\n", colorLabel.Sprint("# a GitHub PAT with read:packages (any account; see the uFE README)"))
+			fmt.Fprintf(out, "  pnpm install              %s\n", colorLabel.Sprint("# resolves @infobloxopen/* from GitHub Packages"))
+			fmt.Fprintf(out, "  pnpm start                %s\n", colorLabel.Sprintf("# builds + serves the shell on http://127.0.0.1:%d", port))
+			fmt.Fprintf(out, "  de project up -f %s   %s\n", shellFile, colorLabel.Sprint("# route the shell + its uFEs through the edge"))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "parent directory to create the shell in (defaults to .)")
+	cmd.Flags().StringVar(&shellFile, "shell", defaultShellFile, "shell roster (kind: Shell) to scaffold the shell from")
+	cmd.Flags().StringVar(&name, "name", "", "shell project dir name (defaults to <roster name>-shell)")
 	return cmd
 }
 

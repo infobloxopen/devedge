@@ -6,10 +6,10 @@
   "private": true,
   "scripts": {
     "build": "ng build",
-    "start": "ng serve",
+    "start": "ng serve --host 127.0.0.1",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "test": "ng test",
-    "doctor": "devedge-ufe doctor --url http://localhost:{{ .DevPort }} --app {{ .AppID }} --metadata metadata.js"
+    "doctor": "devedge-ufe doctor --url http://127.0.0.1:{{ .DevPort }} --app {{ .AppID }} --metadata metadata.js"
   },
   "dependencies": {
     "@angular/animations": "{{ .Versions.Angular }}",

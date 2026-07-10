@@ -1,0 +1,5 @@
+# Build output of `npm run build` (esbuild bundles root-config.ts -> root-config.js),
+# served by `npm start`. Regenerated on every start; never committed.
+root-config.js
+root-config.js.map
+node_modules

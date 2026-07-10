@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/infobloxopen/devedge/pkg/config"
 )
 
 // TestValidateName checks that ValidateName accepts valid DNS labels and
@@ -349,6 +351,149 @@ func TestRender_PresetAndPresetDirExclusive(t *testing.T) {
 	err := Render(Params{Name: "over", ParentDir: parent, Preset: "x", PresetDir: parent})
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("expected mutually-exclusive error, got %v", err)
+	}
+}
+
+// TestRenderShell renders a shell from a small in-memory roster and asserts the
+// proven pieces survive templatization: the roster uFE gets a single-spa
+// registration + loadMfe interop shim, the index.html importmap points at the
+// uFE's CDN bundle, the .npmrc scopes @infobloxopen to GitHub Packages, and the
+// package.json serves on the roster's shell port.
+func TestRenderShell(t *testing.T) {
+	parent := t.TempDir()
+	roster := &config.Shell{
+		APIVersion: config.APIVersion,
+		Kind:       config.KindShell,
+		Metadata:   config.ObjectMeta{Name: "app"},
+		Spec: config.ShellSpec{
+			Host:          "app.dev.test",
+			ShellUpstream: "http://127.0.0.1:4200",
+			CDN:           config.ShellCDN{Host: "cdn.dev.test"},
+			UFEs: []config.ShellUFE{
+				{ID: "demo", Route: "demo", Upstream: "http://127.0.0.1:4201"},
+			},
+		},
+	}
+	if err := RenderShell(ShellParams{ParentDir: parent, Name: "app-shell", Roster: roster}); err != nil {
+		t.Fatalf("RenderShell: %v", err)
+	}
+	root := filepath.Join(parent, "app-shell")
+
+	// No .tmpl files leak into the rendered tree.
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".tmpl") {
+			t.Errorf("rendered shell contains a .tmpl file: %q", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking shell tree: %v", err)
+	}
+
+	// root-config.ts: the roster uFE is registered by hash route and loaded via
+	// the UMD-interop loadMfe shim (specifier == global == app id).
+	rc := readFile(t, filepath.Join(root, "root-config.ts"))
+	if !strings.Contains(rc, "loadMfe('demo', 'demo')") {
+		t.Errorf("root-config.ts missing loadMfe registration for demo:\n%s", rc)
+	}
+	if !strings.Contains(rc, "activeOnHash('#demo')") {
+		t.Errorf("root-config.ts missing hash route for demo:\n%s", rc)
+	}
+	if !strings.Contains(rc, "name: 'demo'") {
+		t.Errorf("root-config.ts missing single-spa app name for demo:\n%s", rc)
+	}
+	// The generic shell drops the notes-specific nav-contribution assertion.
+	if strings.Contains(rc, "assertNavContributions") {
+		t.Errorf("root-config.ts should not carry the uFE-specific nav assertion:\n%s", rc)
+	}
+
+	// index.html: importmap points the uFE specifier at its CDN bundle.
+	idx := readFile(t, filepath.Join(root, "index.html"))
+	if !strings.Contains(idx, `"demo": "https://cdn.dev.test/demo/main.js"`) {
+		t.Errorf("index.html importmap missing demo bundle URL:\n%s", idx)
+	}
+	// The left side-nav lists the uFE with a title-cased label, and the content
+	// area pre-creates the uFE's single-spa mount element so it renders in-place.
+	if !strings.Contains(idx, `href="#demo">Demo</a>`) {
+		t.Errorf("index.html side-nav missing the demo nav item labelled 'Demo':\n%s", idx)
+	}
+	if !strings.Contains(idx, `id="single-spa-application:demo"`) {
+		t.Errorf("index.html missing the pre-created mount element for demo:\n%s", idx)
+	}
+
+	// .npmrc scopes @infobloxopen to GitHub Packages (open-seam install).
+	npmrc := readFile(t, filepath.Join(root, ".npmrc"))
+	if !strings.Contains(npmrc, "@infobloxopen:registry=https://npm.pkg.github.com") {
+		t.Errorf(".npmrc does not scope @infobloxopen to GitHub Packages:\n%s", npmrc)
+	}
+	if !strings.Contains(npmrc, "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}") {
+		t.Errorf(".npmrc missing GitHub Packages token auth:\n%s", npmrc)
+	}
+
+	// package.json: has the start script serving on the roster's shell port (4200
+	// parsed from shellUpstream).
+	pkg := readFile(t, filepath.Join(root, "package.json"))
+	if !strings.Contains(pkg, `"start":`) || !strings.Contains(pkg, "sirv-cli") {
+		t.Errorf("package.json missing start script:\n%s", pkg)
+	}
+	if !strings.Contains(pkg, "--port 4200") {
+		t.Errorf("package.json start does not serve on the shellUpstream port 4200:\n%s", pkg)
+	}
+	if !strings.Contains(pkg, `"name": "app-shell"`) {
+		t.Errorf("package.json name is not app-shell:\n%s", pkg)
+	}
+}
+
+// TestRenderShell_DefaultsPortWhenUnparseable verifies the shell falls back to
+// the default serve port when the roster's shellUpstream carries no port.
+func TestRenderShell_DefaultsPortWhenUnparseable(t *testing.T) {
+	parent := t.TempDir()
+	roster := &config.Shell{
+		Spec: config.ShellSpec{
+			Host:          "app.dev.test",
+			ShellUpstream: "http://shell.example", // no port
+			CDN:           config.ShellCDN{Host: "cdn.dev.test"},
+			UFEs:          []config.ShellUFE{{ID: "demo", Route: "demo", Upstream: "http://127.0.0.1:4201"}},
+		},
+	}
+	if got := ShellServePort(roster); got != defaultShellPort {
+		t.Fatalf("ShellServePort with no port = %d, want %d", got, defaultShellPort)
+	}
+	if err := RenderShell(ShellParams{ParentDir: parent, Name: "app-shell", Roster: roster}); err != nil {
+		t.Fatalf("RenderShell: %v", err)
+	}
+	pkg := readFile(t, filepath.Join(parent, "app-shell", "package.json"))
+	if !strings.Contains(pkg, "--port 9000") {
+		t.Errorf("package.json did not fall back to default port 9000:\n%s", pkg)
+	}
+}
+
+// TestRenderShell_RefusesNonEmptyTarget verifies RenderShell never overwrites.
+func TestRenderShell_RefusesNonEmptyTarget(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "app-shell")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	roster := &config.Shell{
+		Spec: config.ShellSpec{
+			Host:          "app.dev.test",
+			ShellUpstream: "http://127.0.0.1:4200",
+			CDN:           config.ShellCDN{Host: "cdn.dev.test"},
+			UFEs:          []config.ShellUFE{{ID: "demo", Route: "demo", Upstream: "http://127.0.0.1:4201"}},
+		},
+	}
+	if err := RenderShell(ShellParams{ParentDir: parent, Name: "app-shell", Roster: roster}); err == nil {
+		t.Fatal("RenderShell into non-empty target: expected error, got nil")
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "keep.txt")); err != nil || string(data) != "keep" {
+		t.Errorf("sentinel modified/removed: %v %q", err, string(data))
 	}
 }
 

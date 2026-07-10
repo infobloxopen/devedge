@@ -1,0 +1,17 @@
+{
+  "//": "Type-checks the standalone shell (root-config.ts). The shell is not an Angular app, so this is a plain tsconfig — no angularCompilerOptions. The build is via esbuild (see package.json); this config is only for an optional `tsc -p tsconfig.json --noEmit`. Dependencies resolve from ./node_modules after `pnpm install`.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "node",
+    "lib": ["ES2022", "dom"],
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["root-config.ts", "environment.ts"]
+}
