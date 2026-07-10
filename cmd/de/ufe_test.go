@@ -226,6 +226,72 @@ spec:
 	}
 }
 
+// TestUFEOverride_PrintsCSPImportMapSnippet runs `de ufe override` in --dry-run
+// (so it needs no daemon) against a captured buffer and asserts the printed
+// integrated-mode block carries the CSP-namespaced import-map-overrides key, the
+// edge bundle URL the live shell fetches, and the CSP window.ufeOverride(name,
+// url) convenience. This is the snippet-building/printing path; the edge
+// route-registration leg is exercised separately (and by the live verify).
+func TestUFEOverride_PrintsCSPImportMapSnippet(t *testing.T) {
+	out, err := runUFE(t, "override", "notes",
+		"--env", "https://env-2a.test.infoblox.com",
+		"--namespace", "@infoblox-csp",
+		"--dry-run")
+	if err != nil {
+		t.Fatalf("ufe override: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		// module defaults to NAME; namespace scopes the key.
+		`import-map-override:@infoblox-csp/notes`,
+		// route + cdn default → the trusted-TLS bundle the live shell fetches.
+		`https://cdn.dev.test/notes/main.js`,
+		// the CSP convenience form (namespace is @infoblox-csp).
+		`ufeOverride("notes", "https://cdn.dev.test/notes/main.js")`,
+		// the clear form + the target env are reported too.
+		`ufeOverride("notes")`,
+		`https://env-2a.test.infoblox.com`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("override output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestUFEOverride_BareSpecifierNoNamespace verifies that without --namespace the
+// override key is the bare module specifier (no leading namespace/), and that
+// --module + --route are honored independently of NAME.
+func TestUFEOverride_BareSpecifierNoNamespace(t *testing.T) {
+	out, err := runUFE(t, "override", "discovery",
+		"--env", "https://shell.dev.test",
+		"--module", "@acme/discovery",
+		"--route", "disco",
+		"--dry-run")
+	if err != nil {
+		t.Fatalf("ufe override: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `import-map-override:@acme/discovery`) {
+		t.Errorf("bare-specifier key missing (should be the module, no extra namespace):\n%s", out)
+	}
+	if !strings.Contains(out, `https://cdn.dev.test/disco/main.js`) {
+		t.Errorf("bundle URL should follow --route disco:\n%s", out)
+	}
+	// The CSP convenience is offered for a bare specifier too.
+	if !strings.Contains(out, `ufeOverride("@acme/discovery", "https://cdn.dev.test/disco/main.js")`) {
+		t.Errorf("CSP convenience missing for bare specifier:\n%s", out)
+	}
+}
+
+// TestUFEOverride_RequiresEnv verifies --env is mandatory.
+func TestUFEOverride_RequiresEnv(t *testing.T) {
+	_, err := runUFE(t, "override", "notes", "--dry-run")
+	if err == nil {
+		t.Fatal("expected an error when --env is omitted, got nil")
+	}
+	if !strings.Contains(err.Error(), "env") {
+		t.Errorf("error should name the required --env flag:\n%v", err)
+	}
+}
+
 // seedShell is a minimal valid kind: Shell roster with one uFE, used by the
 // `de ufe shell` tests.
 const seedShell = `apiVersion: devedge.infoblox.dev/v1alpha1
