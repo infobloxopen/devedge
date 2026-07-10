@@ -39,11 +39,6 @@ const (
 	// shellHost overrides it (data, not core code); the public open core never
 	// hardcodes a specific product host.
 	defaultShellHost = "app.dev.test"
-	// cspNamespace is the module-specifier namespace CSP shells scope their uFEs
-	// under. When `de ufe override --namespace` names it (or leaves it empty), the
-	// printed snippet also offers the CSP `window.ufeOverride(name, url)`
-	// convenience, which internally writes import-map-override:@infoblox-csp/<name>.
-	cspNamespace = "@infoblox-csp"
 )
 
 // ufeCmd is `de ufe`, the noun for micro-frontend scaffolding. It mirrors
@@ -371,7 +366,7 @@ type ufeOverrideParams struct {
 	name      string // the local uFE (edge path segment + default module specifier)
 	env       string // the LIVE hosted shell URL to inject the override into
 	module    string // the specifier the target shell knows the uFE by (defaults to name)
-	namespace string // shell specifier namespace, e.g. @infoblox-csp ("" = bare specifier)
+	namespace string // shell specifier namespace, e.g. @acme ("" = bare specifier)
 	devPort   int    // the local uFE dev-server port to serve through the edge
 	cdn       string // the edge CDN host that serves the local bundle over trusted TLS
 	route     string // the edge path segment for the local uFE (defaults to name)
@@ -392,17 +387,10 @@ func (p ufeOverrideParams) bundleURL() string {
 	return fmt.Sprintf("https://%s/%s/main.js", p.cdn, p.route)
 }
 
-// cspConvenient reports whether the CSP `window.ufeOverride(name, url)` helper
-// applies to the target shell: it does for a bare specifier or the @infoblox-csp
-// namespace (whose key is exactly what ufeOverride writes).
-func (p ufeOverrideParams) cspConvenient() bool {
-	return p.namespace == "" || p.namespace == cspNamespace
-}
-
 // ufeOverrideCmd is `de ufe override NAME` — the "integrated <env>" run mode. It
 // serves a developer's LOCAL uFE through the devedge edge and prints the exact
 // browser import-map-overrides snippet to inject that local bundle into a LIVE
-// hosted shell (e.g. a CSP env). The live-shell dev loop is pure browser-side
+// hosted shell. The live-shell dev loop is pure browser-side
 // import-map-overrides (no proxy): the shell cross-origin-fetches the local
 // main.js. devedge already satisfies the three requirements — the edge serves the
 // local uFE at https://<cdn>/<route>/main.js over a mkcert-trusted cert, and a
@@ -434,14 +422,15 @@ uFE served through the edge satisfies all three (mkcert CA trusted after
 
 NAME is the local uFE (its edge path segment and default module specifier). Use
 --module when the target shell knows the uFE by a different specifier, and
---namespace for a namespaced shell (e.g. @infoblox-csp for a CSP env — its key
-becomes import-map-override:@infoblox-csp/<module> and it exposes
-window.ufeOverride). The uFE dev server must be running (pnpm start). --dry-run
-prints the snippet without registering the edge route (no daemon needed).
+--namespace for a namespaced shell (e.g. @acme — the key becomes
+import-map-override:@acme/<module>). The override uses the standard
+import-map-overrides localStorage key, so any shell that supports it (its UI or a
+helper global) picks it up. The uFE dev server must be running (pnpm start).
+--dry-run prints the snippet without registering the edge route (no daemon needed).
 
 Examples:
-  de ufe override notes --env https://env-2a.test.infoblox.com --namespace @infoblox-csp
-  de ufe override notes --env https://env-2a.test.infoblox.com --namespace @infoblox-csp --dev-port 4210 --open
+  de ufe override notes --env https://your-shell.example.com
+  de ufe override notes --env https://your-shell.example.com --namespace @acme --dev-port 4210 --open
   de ufe override discovery --env https://shell.dev.test --module @acme/discovery --route disco`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -486,9 +475,9 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&env, "env", "", "live hosted shell URL to inject the override into (REQUIRED), e.g. https://env-2a.test.infoblox.com")
+	cmd.Flags().StringVar(&env, "env", "", "live hosted shell URL to inject the override into (REQUIRED), e.g. https://your-shell.example.com")
 	cmd.Flags().StringVar(&module, "module", "", "module specifier the target shell knows the uFE by (defaults to NAME)")
-	cmd.Flags().StringVar(&namespace, "namespace", "", "specifier namespace of the target shell, e.g. @infoblox-csp for a CSP env (empty = bare specifier)")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "specifier namespace of the target shell, e.g. @acme (empty = bare specifier)")
 	cmd.Flags().IntVar(&devPort, "dev-port", ufescaffold.DefaultDevPort, "local uFE dev-server port to serve through the edge")
 	cmd.Flags().StringVar(&cdn, "cdn", defaultShellCDNHost, "edge CDN host that serves the local bundle over trusted TLS")
 	cmd.Flags().StringVar(&route, "route", "", "edge path segment for the local uFE (defaults to NAME)")
@@ -531,21 +520,15 @@ func printUFEOverride(out io.Writer, p ufeOverrideParams) {
 
 	fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Set the override — paste into the live shell's DevTools console:"))
 	fmt.Fprintf(out, "  localStorage.setItem(%q, %q); location.reload()\n", storageKey, bundle)
-	if p.cspConvenient() {
-		fmt.Fprintf(out, "%s\n", colorLabel.Sprint("  # or, in a CSP shell that exposes window.ufeOverride:"))
-		fmt.Fprintf(out, "  ufeOverride(%q, %q)\n", p.module, bundle)
-	}
 
 	fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Clear the override:"))
-	if p.cspConvenient() {
-		fmt.Fprintf(out, "  ufeOverride(%q)\n", p.module)
-	}
 	fmt.Fprintf(out, "  localStorage.removeItem(%q); location.reload()\n", storageKey)
 
 	fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Notes:"))
 	fmt.Fprintf(out, "  %s the uFE dev server must be running (pnpm start) and serving main.js\n", colorLabel.Sprint("-"))
 	fmt.Fprintf(out, "  %s the bundle sends Access-Control-Allow-Origin: * (de ufe new does this)\n", colorLabel.Sprint("-"))
 	fmt.Fprintf(out, "  %s the browser must trust the devedge mkcert CA (it does after 'de install')\n", colorLabel.Sprint("-"))
+	fmt.Fprintf(out, "  %s this is the standard import-map-overrides key; a shell's override UI/helper writes the same one\n", colorLabel.Sprint("-"))
 }
 
 // defaultShell builds a create-default kind: Shell around a single uFE. The

@@ -225,30 +225,29 @@ spec:
 	}
 }
 
-// TestUFEOverride_PrintsCSPImportMapSnippet runs `de ufe override` in --dry-run
-// (so it needs no daemon) against a captured buffer and asserts the printed
-// integrated-mode block carries the CSP-namespaced import-map-overrides key, the
-// edge bundle URL the live shell fetches, and the CSP window.ufeOverride(name,
-// url) convenience. This is the snippet-building/printing path; the edge
-// route-registration leg is exercised separately (and by the live verify).
-func TestUFEOverride_PrintsCSPImportMapSnippet(t *testing.T) {
+// TestUFEOverride_PrintsImportMapSnippet runs `de ufe override` in --dry-run (so
+// it needs no daemon) against a captured buffer and asserts the printed
+// integrated-mode block carries the namespaced import-map-overrides localStorage
+// key, the edge bundle URL the live shell fetches, and the target env. This is
+// the snippet-building/printing path; the edge route-registration leg is
+// exercised separately (and by the live verify).
+func TestUFEOverride_PrintsImportMapSnippet(t *testing.T) {
 	out, err := runUFE(t, "override", "notes",
-		"--env", "https://env-2a.test.infoblox.com",
-		"--namespace", "@infoblox-csp",
+		"--env", "https://your-shell.example.com",
+		"--namespace", "@acme",
 		"--dry-run")
 	if err != nil {
 		t.Fatalf("ufe override: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		// module defaults to NAME; namespace scopes the key.
-		`import-map-override:@infoblox-csp/notes`,
+		// module defaults to NAME; namespace scopes the standard override key.
+		`import-map-override:@acme/notes`,
 		// route + cdn default → the trusted-TLS bundle the live shell fetches.
 		`https://cdn.dev.test/notes/main.js`,
-		// the CSP convenience form (namespace is @infoblox-csp).
-		`ufeOverride("notes", "https://cdn.dev.test/notes/main.js")`,
-		// the clear form + the target env are reported too.
-		`ufeOverride("notes")`,
-		`https://env-2a.test.infoblox.com`,
+		// the generic set + clear localStorage forms, and the target env.
+		`localStorage.setItem("import-map-override:@acme/notes"`,
+		`localStorage.removeItem("import-map-override:@acme/notes")`,
+		`https://your-shell.example.com`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("override output missing %q:\n%s", want, out)
@@ -274,9 +273,9 @@ func TestUFEOverride_BareSpecifierNoNamespace(t *testing.T) {
 	if !strings.Contains(out, `https://cdn.dev.test/disco/main.js`) {
 		t.Errorf("bundle URL should follow --route disco:\n%s", out)
 	}
-	// The CSP convenience is offered for a bare specifier too.
-	if !strings.Contains(out, `ufeOverride("@acme/discovery", "https://cdn.dev.test/disco/main.js")`) {
-		t.Errorf("CSP convenience missing for bare specifier:\n%s", out)
+	// The generic localStorage set form carries the bare-specifier key + the bundle.
+	if !strings.Contains(out, `localStorage.setItem("import-map-override:@acme/discovery", "https://cdn.dev.test/disco/main.js")`) {
+		t.Errorf("generic override set form missing for bare specifier:\n%s", out)
 	}
 }
 
