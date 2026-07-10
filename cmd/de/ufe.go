@@ -146,7 +146,8 @@ Examples:
 
 			fmt.Fprintf(out, "\n%s\n", colorHeader.Sprint("Next steps:"))
 			fmt.Fprintf(out, "  cd %s\n", root)
-			fmt.Fprintf(out, "  pnpm install              %s\n", colorLabel.Sprint("# link local SDK packages until published (see README)"))
+			fmt.Fprintf(out, "  export GITHUB_TOKEN=...    %s\n", colorLabel.Sprint("# a GitHub PAT with read:packages (any account; see README)"))
+			fmt.Fprintf(out, "  pnpm install              %s\n", colorLabel.Sprint("# resolves @infobloxopen/* from GitHub Packages"))
 			fmt.Fprintf(out, "  pnpm start                %s\n", colorLabel.Sprintf("# ng serve on http://localhost:%d", devPort))
 			fmt.Fprintf(out, "  pnpm run doctor           %s\n", colorLabel.Sprint("# loud dev-loop checklist (cert/CORS/manifest/nav)"))
 			if shellFile != "" {

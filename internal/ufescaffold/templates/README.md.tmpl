@@ -40,15 +40,20 @@ already `{{ .AppID }}`.
 
 ## Install
 
+The open-core `@infobloxopen/devedge-ufe-*` packages are published to **GitHub
+Packages** (public). GitHub requires a token to install even public npm
+packages, so set `GITHUB_TOKEN` to a PAT with the `read:packages` scope — any
+GitHub account can create one; it is **not** gated on Infoblox org membership.
+The generated `.npmrc` already points the `@infobloxopen` scope at GitHub
+Packages; everything else installs anonymously from npmjs.
+
 ```sh
-# Once the SDK packages are published to npm:
-pnpm install     # (or npm install)
+export GITHUB_TOKEN=<a PAT with read:packages>   # https://github.com/settings/tokens
+pnpm install     # (or npm install) — resolves @infobloxopen/* from GitHub Packages
 ```
 
-The `@infobloxopen/devedge-ufe-*` packages are referenced by version. **Until
-they are published**, link them from a local checkout of the SDK with a `link:`
-dependency — this points each package at your local build without a global
-registry:
+**Working on the SDK itself?** Link a local checkout instead of the registry —
+no token needed:
 
 ```sh
 # From a clone of infobloxopen/devedge-ufe-sdk, built with `pnpm -r build`.
@@ -60,10 +65,6 @@ pnpm add "@infobloxopen/devedge-ufe-core@link:$SDK/core" \
   "@infobloxopen/devedge-ufe-oidc@link:$SDK/oidc" \
   "@infobloxopen/devedge-ufe-dev-loop@link:$SDK/dev-loop"
 ```
-
-`pnpm link --global` also works but needs a configured global bin dir
-(`pnpm setup`) and refuses to link a package into itself, so the `link:`
-dependency above is the simpler pre-publish path.
 
 ## Local dev loop
 

@@ -371,3 +371,19 @@ func checkFileContains(t *testing.T, path, substr string) {
 		t.Errorf("file %q does not contain %q\ncontent:\n%s", path, substr, string(data))
 	}
 }
+
+// TestRender_NpmrcScopesGitHubPackages asserts the generated .npmrc points the
+// @infobloxopen scope at GitHub Packages (where the open-core SDK is published)
+// with token auth, while everything else still defaults to npmjs. This is what
+// lets a bare `pnpm install` resolve @infobloxopen/devedge-ufe-* on the open
+// seam without any Infoblox-org access (only a read:packages GitHub PAT).
+func TestRender_NpmrcScopesGitHubPackages(t *testing.T) {
+	parent := t.TempDir()
+	if err := Render(Params{Name: "demo", ParentDir: parent}); err != nil {
+		t.Fatal(err)
+	}
+	npmrc := filepath.Join(parent, "demo", ".npmrc")
+	checkFileContains(t, npmrc, "@infobloxopen:registry=https://npm.pkg.github.com")
+	checkFileContains(t, npmrc, "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}")
+	checkFileContains(t, npmrc, "registry=https://registry.npmjs.org/")
+}
