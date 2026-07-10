@@ -20,10 +20,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   session. `--namespace` keeps the CLI generic (a CSP env is just `--namespace @infoblox-csp`); `--dry-run`
   prints without a daemon.
 - **`de ufe shell --preset | --preset-dir <path>`** — apply a preset overlay to a scaffolded shell, the
-  same mechanism `de ufe new` uses. The private `infoblox-cto-shell` preset (in
-  `Infoblox-CTO/devedge-ufe-sdk-internal`) uses this to turn the open shell into the Infoblox commercial
-  shell: Okta session + the **grouped INFOBLOX_GROUPS nav** + PDS chrome, replacing the open flat
-  "Applications" side-nav.
+  same mechanism `de ufe new` uses. A preset is a downstream extension point: a consumer supplies one
+  out-of-tree with `--preset-dir` to rebind things like the session provider, design system, and nav
+  shell (e.g. replacing the open flat "Applications" side-nav with a grouped nav taxonomy). The public
+  CLI ships no built-in preset.
 
 ## [0.16.0] - 2026-07-09
 
@@ -34,14 +34,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   self-contained render loop: `de ufe new <x>` → `de ufe shell` → `pnpm start`
   (uFE + shell) → `de project up` renders the uFE in a shell, with no copying of
   the example shell. The generated shell has a persistent left **side-nav menu**
-  in the commercial `csp.root.ui` style — one item per roster uFE (title-cased
-  label), active-route highlighting, and the signed-in user in the header from
+  — one item per roster uFE (title-cased label), active-route highlighting, and
+  the signed-in user in the header from
   the shell-owned session — and each uFE mounts into a pre-created single-spa
   element in the content area. It renders locally with a no-auth dev session
   (flip `environment.useDevSession` for real OIDC), serves on the roster's
   `shellUpstream` port via `npx esbuild` + `sirv`, and installs the open-core
-  SDK from GitHub Packages. A grouped nav taxonomy is what the commercial overlay
-  binds on top; the open shell ships a flat `Applications` section. `de ufe
+  SDK from GitHub Packages. A grouped nav taxonomy is what a preset overlay can
+  bind on top; the open shell ships a flat `Applications` section. `de ufe
   shell` warns if the roster lists no uFEs.
 
 ### Fixed

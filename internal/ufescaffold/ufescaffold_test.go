@@ -176,8 +176,8 @@ func TestRender_UnknownPresetFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("Render with unknown preset: expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "does-not-exist") || !strings.Contains(err.Error(), "infoblox-cto") {
-		t.Errorf("preset error should name the preset and point at infoblox-cto: %v", err)
+	if !strings.Contains(err.Error(), "does-not-exist") || !strings.Contains(err.Error(), "--preset-dir") {
+		t.Errorf("preset error should name the preset and point at --preset-dir: %v", err)
 	}
 	// Nothing written.
 	if entries, _ := os.ReadDir(parent); len(entries) != 0 {
@@ -501,8 +501,8 @@ func TestRenderShell_RefusesNonEmptyTarget(t *testing.T) {
 // applies a preset overlay on top of the rendered shell, rendered against the
 // shell's own template data (shellData): it overrides a base shell file
 // (environment.ts) and can reference shell fields (Name, ShellPort, UFEs) that a
-// uFE templateData does not carry. This is the mechanism the commercial
-// infoblox-cto-shell preset rides on.
+// uFE templateData does not carry. This is the mechanism a downstream shell
+// preset overlay rides on.
 func TestRenderShell_PresetDirOverlays(t *testing.T) {
 	presetDir := t.TempDir()
 	writeFile(t, filepath.Join(presetDir, "preset.json"), `{
@@ -518,7 +518,7 @@ func TestRenderShell_PresetDirOverlays(t *testing.T) {
 	writeFile(t, filepath.Join(presetDir, "environment.ts"),
 		"export const environment = { useDevSession: false, port: {{ .ShellPort }} };\n")
 	writeFile(t, filepath.Join(presetDir, "branding.tmpl"),
-		"# {{ .Name }} — commercial shell\n{{- range .UFEs }}\n- {{ .Label }} (#{{ .Route }})\n{{- end }}\n")
+		"# {{ .Name }} — custom shell\n{{- range .UFEs }}\n- {{ .Label }} (#{{ .Route }})\n{{- end }}\n")
 
 	parent := t.TempDir()
 	roster := &config.Shell{
@@ -548,7 +548,7 @@ func TestRenderShell_PresetDirOverlays(t *testing.T) {
 	}
 	// A new file was added, rendered against the shell's Name + UFEs.
 	branding := readFile(t, filepath.Join(root, "BRANDING.md"))
-	if !strings.Contains(branding, "app-shell — commercial shell") {
+	if !strings.Contains(branding, "app-shell — custom shell") {
 		t.Errorf("shell overlay did not render Name into the added file: %q", branding)
 	}
 	if !strings.Contains(branding, "- Demo (#demo)") {

@@ -77,14 +77,14 @@ type Params struct {
 	DevPort int
 	// Preset, when non-empty, names a BUILT-IN overlay applied on top of the
 	// base scaffold after the base is rendered. The public CLI ships no
-	// proprietary built-in preset; an unknown preset is a clear error pointing
-	// at --preset-dir.
+	// built-in preset; an unknown preset is a clear error pointing at
+	// --preset-dir.
 	Preset string
 	// PresetDir, when non-empty, is a filesystem path to a preset directory
 	// containing a canonical preset.json (see PresetManifest). Its overlay is
-	// applied on top of the base scaffold. This is how proprietary presets
-	// (e.g. infoblox-cto from the private repo) are applied. Preset and
-	// PresetDir are mutually exclusive.
+	// applied on top of the base scaffold. This is the downstream extension
+	// point a consumer supplies out-of-tree. Preset and PresetDir are mutually
+	// exclusive.
 	PresetDir string
 }
 

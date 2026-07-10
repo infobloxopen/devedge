@@ -6,7 +6,7 @@
  * authenticates; it provides the read-only session into Angular DI via the
  * open-core SESSION_PROVIDER token (provideDevedgeSession), so components and
  * the bearer interceptor can read the token. It does NOT reach for any
- * proprietary RootUi* tokens.
+ * host-specific root-ui tokens.
  */
 import { enableProdMode, NgZone } from '@angular/core';
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';

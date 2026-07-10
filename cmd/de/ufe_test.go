@@ -104,17 +104,16 @@ func TestUFENew_CreatesDefaultShell(t *testing.T) {
 
 // TestUFENew_PresetShellHostOverride verifies a preset directory whose manifest
 // declares shellHost overrides the public app.dev.test create-default shell
-// host (the mechanism the private infoblox-cto preset uses to serve at
-// csp.dev.test). The override is data-driven — the public core never hardcodes
-// the product host.
+// host (the mechanism a downstream preset uses to serve at its own host). The
+// override is data-driven — the public core never hardcodes the product host.
 func TestUFENew_PresetShellHostOverride(t *testing.T) {
 	// A minimal, valid preset directory: a manifest with shellHost + one overlay
 	// file (a manifest must overlay at least one file).
 	presetDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(presetDir, "preset.json"), []byte(`{
-	  "name": "test-cto",
+	  "name": "test-preset",
 	  "description": "test preset that overrides the shell host",
-	  "shellHost": "csp.dev.test",
+	  "shellHost": "custom.dev.test",
 	  "files": [ { "path": "PRESET.txt", "template": "preset.txt" } ]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -132,8 +131,8 @@ func TestUFENew_PresetShellHostOverride(t *testing.T) {
 	}
 
 	s := loadShell(t, shellFile)
-	if s.Spec.Host != "csp.dev.test" {
-		t.Errorf("shell host = %q, want csp.dev.test (preset shellHost override)", s.Spec.Host)
+	if s.Spec.Host != "custom.dev.test" {
+		t.Errorf("shell host = %q, want custom.dev.test (preset shellHost override)", s.Spec.Host)
 	}
 	// The shell identity stays the generic create-default name.
 	if s.Project() != "app" {

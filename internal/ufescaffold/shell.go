@@ -33,16 +33,16 @@ type ShellParams struct {
 	// Roster is the parsed kind: Shell topology the shell is rendered from.
 	Roster *config.Shell
 	// Preset, when non-empty, names a BUILT-IN overlay applied on top of the
-	// base shell after it is rendered. The public CLI ships no proprietary
-	// built-in preset; an unknown preset is a clear error pointing at
-	// --preset-dir. Preset and PresetDir are mutually exclusive.
+	// base shell after it is rendered. The public CLI ships no built-in preset;
+	// an unknown preset is a clear error pointing at --preset-dir. Preset and
+	// PresetDir are mutually exclusive.
 	Preset string
 	// PresetDir, when non-empty, is a filesystem path to a preset directory
 	// holding a canonical preset.json (see PresetManifest). Its overlay is
-	// applied on top of the base shell — this is how the commercial shell
-	// preset (infoblox-cto-shell from the private repo: Okta session, PDS
-	// chrome, grouped INFOBLOX_GROUPS nav) is applied. The overlay is rendered
-	// against the shell's own template data (shellData).
+	// applied on top of the base shell — this is the downstream extension point
+	// for rebinding things like the session provider, design system, and nav
+	// shell. The overlay is rendered against the shell's own template data
+	// (shellData).
 	PresetDir string
 }
 

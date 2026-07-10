@@ -36,8 +36,8 @@ const (
 	// defaultShellHost is the host a create-default (from-scratch) shell is
 	// served at when no preset overrides it. It is a single generic dev host
 	// (NOT derived per-uFE) so multiple uFEs share one shell origin. A preset's
-	// shellHost (e.g. the private infoblox-cto preset's csp.dev.test) overrides
-	// it; the public open core never hardcodes a specific product host.
+	// shellHost overrides it (data, not core code); the public open core never
+	// hardcodes a specific product host.
 	defaultShellHost = "app.dev.test"
 	// cspNamespace is the module-specifier namespace CSP shells scope their uFEs
 	// under. When `de ufe override --namespace` names it (or leaves it empty), the
@@ -88,21 +88,20 @@ matches the edge route 'de project up' creates to the shell host. Build + serve
 use npx (esbuild + sirv-cli), so no destructive install of a global toolchain is
 needed.
 
-Apply an overlay on top of the base shell with either:
+A preset is a downstream extension point: an overlay on top of the base shell
+that rebinds things like the session provider, design system, and nav shell.
+Apply one with either:
   --preset <name>      a built-in preset (the public CLI ships none)
   --preset-dir <path>  a preset directory holding a canonical preset.json
-The public CLI ships no proprietary preset; the 'infoblox-cto-shell' preset (the
-Infoblox-branded commercial shell: Okta session + PDS chrome + the grouped
-INFOBLOX_GROUPS nav taxonomy) is provided by the private
-Infoblox-CTO/devedge-ufe-sdk-internal repo — apply it with --preset-dir
-<repo>/preset/infoblox-cto-shell. An unknown built-in preset or a
-missing/malformed preset.json fails with a clear error.
+The public CLI ships no built-in preset — overlay your own with --preset-dir
+<path>. An unknown built-in preset or a missing/malformed preset.json fails with
+a clear error.
 
 Examples:
   de ufe shell
   de ufe shell --shell notesapp-shell.yaml --name notesapp-shell
   de ufe shell --dir ./frontend
-  de ufe shell --preset-dir ../devedge-ufe-sdk-internal/preset/infoblox-cto-shell`,
+  de ufe shell --preset-dir ./my-shell-preset`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			data, err := os.ReadFile(shellFile)
@@ -177,7 +176,7 @@ Examples:
 	cmd.Flags().StringVar(&shellFile, "shell", defaultShellFile, "shell roster (kind: Shell) to scaffold the shell from")
 	cmd.Flags().StringVar(&name, "name", "", "shell project dir name (defaults to <roster name>-shell)")
 	cmd.Flags().StringVar(&preset, "preset", "", "built-in overlay preset to apply on top of the base shell (the public CLI ships none)")
-	cmd.Flags().StringVar(&presetDir, "preset-dir", "", "path to a preset directory (with a canonical preset.json) to overlay on top of the base shell — e.g. the private infoblox-cto-shell commercial preset")
+	cmd.Flags().StringVar(&presetDir, "preset-dir", "", "path to a preset directory (with a canonical preset.json) to overlay a downstream preset on top of the base shell (the public CLI ships none)")
 	cmd.MarkFlagsMutuallyExclusive("preset", "preset-dir")
 	return cmd
 }
@@ -213,20 +212,21 @@ updated in place, never duplicated). If --shell names a file that does not exist
 a sensible default shell is created containing just this uFE. Pass --shell "" to
 skip roster wiring entirely (scaffold only).
 
-Apply an overlay on top of the base scaffold with either:
+A preset is a downstream extension point: an overlay on top of the base scaffold
+that rebinds things like the session provider, design system, and nav. Apply one
+with either:
   --preset <name>      a built-in preset (the public CLI ships none)
   --preset-dir <path>  a preset directory holding a canonical preset.json
-The public CLI ships no proprietary preset; the 'infoblox-cto' preset is
-provided by the private Infoblox-CTO/devedge-ufe-sdk-internal repo — apply it
-with --preset-dir <repo>/preset/infoblox-cto. An unknown built-in preset or a
-missing/malformed preset.json fails with a clear error.
+The public CLI ships no built-in preset — overlay your own with --preset-dir
+<path>. An unknown built-in preset or a missing/malformed preset.json fails with
+a clear error.
 
 Examples:
   de ufe new discovery
   de ufe new widgets --dir ./frontends
   de ufe new tags --shell notesapp-shell.yaml --route tags --dev-port 4202
   de ufe new widgets --shell ""   # scaffold only, no roster wiring
-  de ufe new widgets --preset-dir ../devedge-ufe-sdk-internal/preset/infoblox-cto`,
+  de ufe new widgets --preset-dir ./my-preset`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -263,7 +263,7 @@ Examples:
 			//
 			// The create-default shell host is app.dev.test unless the applied
 			// preset overrides it via its manifest's shellHost (data, not core
-			// code — e.g. the private infoblox-cto preset sets csp.dev.test).
+			// code).
 			if shellFile != "" {
 				shellHost := defaultShellHost
 				if h := ufescaffold.PresetShellHost(presetDir); h != "" {
@@ -288,7 +288,7 @@ Examples:
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "parent directory to create the uFE in (defaults to .)")
 	cmd.Flags().StringVar(&preset, "preset", "", "built-in overlay preset to apply on top of the base (the public CLI ships none)")
-	cmd.Flags().StringVar(&presetDir, "preset-dir", "", "path to a preset directory (with a canonical preset.json) to overlay on top of the base — e.g. the private infoblox-cto preset")
+	cmd.Flags().StringVar(&presetDir, "preset-dir", "", "path to a preset directory (with a canonical preset.json) to overlay a downstream preset on top of the base (the public CLI ships none)")
 	cmd.Flags().StringVar(&shellFile, "shell", defaultShellFile, `shell config to register the uFE into (created if absent); pass "" to skip roster wiring`)
 	cmd.Flags().StringVar(&route, "route", "", "hash route the uFE mounts at + CDN path segment (defaults to NAME)")
 	cmd.Flags().IntVar(&devPort, "dev-port", defaultUFEDevPort, "uFE dev-server port for its shell-roster upstream")

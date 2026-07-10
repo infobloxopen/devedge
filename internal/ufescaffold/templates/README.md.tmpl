@@ -98,10 +98,9 @@ pnpm build                 # UMD bundle → dist/{{ .AppID }}/
 ```
 
 The base scaffold ships a generic static-bundle `Dockerfile`, a minimal
-`deploy/manifest.yaml`, and a `charts/{{ .AppID }}-ufe/` Helm chart. It does
-**not** ship the FeatureFlag-CRD chart — that is provided by the `infoblox-cto`
-preset (`de ufe new {{ .Name }} --preset infoblox-cto`), which lives in the
-private `Infoblox-CTO/devedge-ufe-sdk-internal` repo.
+`deploy/manifest.yaml`, and a `charts/{{ .AppID }}-ufe/` Helm chart. Anything
+beyond that generic deploy chart is provided by a preset overlaid with
+`--preset-dir` (a downstream extension point; the public scaffold ships none).
 
 ## Layout
 
