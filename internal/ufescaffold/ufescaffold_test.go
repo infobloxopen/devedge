@@ -497,6 +497,112 @@ func TestRenderShell_RefusesNonEmptyTarget(t *testing.T) {
 	}
 }
 
+// TestRenderShell_PresetDirOverlays verifies `de ufe shell --preset-dir`
+// applies a preset overlay on top of the rendered shell, rendered against the
+// shell's own template data (shellData): it overrides a base shell file
+// (environment.ts) and can reference shell fields (Name, ShellPort, UFEs) that a
+// uFE templateData does not carry. This is the mechanism the commercial
+// infoblox-cto-shell preset rides on.
+func TestRenderShell_PresetDirOverlays(t *testing.T) {
+	presetDir := t.TempDir()
+	writeFile(t, filepath.Join(presetDir, "preset.json"), `{
+	  "name": "shell-fixture",
+	  "description": "test shell overlay",
+	  "files": [
+	    { "path": "environment.ts", "template": "environment.ts" },
+	    { "path": "BRANDING.md", "template": "branding.tmpl" }
+	  ]
+	}`)
+	// Override environment.ts and reference shell-only template fields so the
+	// overlay proves it renders against shellData, not a uFE templateData.
+	writeFile(t, filepath.Join(presetDir, "environment.ts"),
+		"export const environment = { useDevSession: false, port: {{ .ShellPort }} };\n")
+	writeFile(t, filepath.Join(presetDir, "branding.tmpl"),
+		"# {{ .Name }} — commercial shell\n{{- range .UFEs }}\n- {{ .Label }} (#{{ .Route }})\n{{- end }}\n")
+
+	parent := t.TempDir()
+	roster := &config.Shell{
+		APIVersion: config.APIVersion,
+		Kind:       config.KindShell,
+		Metadata:   config.ObjectMeta{Name: "app"},
+		Spec: config.ShellSpec{
+			Host:          "app.dev.test",
+			ShellUpstream: "http://127.0.0.1:4200",
+			CDN:           config.ShellCDN{Host: "cdn.dev.test"},
+			UFEs:          []config.ShellUFE{{ID: "demo", Route: "demo", Upstream: "http://127.0.0.1:4201"}},
+		},
+	}
+	if err := RenderShell(ShellParams{ParentDir: parent, Name: "app-shell", Roster: roster, PresetDir: presetDir}); err != nil {
+		t.Fatalf("RenderShell with --preset-dir: %v", err)
+	}
+	root := filepath.Join(parent, "app-shell")
+
+	// environment.ts was overridden by the (rendered) overlay, with the shell's
+	// own port field substituted.
+	env := readFile(t, filepath.Join(root, "environment.ts"))
+	if !strings.Contains(env, "useDevSession: false") {
+		t.Errorf("environment.ts not overridden by shell preset overlay: %q", env)
+	}
+	if !strings.Contains(env, "port: 4200") {
+		t.Errorf("shell overlay did not render the ShellPort field (want 4200): %q", env)
+	}
+	// A new file was added, rendered against the shell's Name + UFEs.
+	branding := readFile(t, filepath.Join(root, "BRANDING.md"))
+	if !strings.Contains(branding, "app-shell — commercial shell") {
+		t.Errorf("shell overlay did not render Name into the added file: %q", branding)
+	}
+	if !strings.Contains(branding, "- Demo (#demo)") {
+		t.Errorf("shell overlay did not range over UFEs: %q", branding)
+	}
+	// A base shell file the preset did NOT touch still exists.
+	if _, err := os.Stat(filepath.Join(root, "root-config.ts")); err != nil {
+		t.Errorf("shell overlay removed an untouched base file: %v", err)
+	}
+}
+
+// TestRenderShell_PresetDirMalformed verifies a malformed shell preset.json
+// fails loud and removes the partial shell (same atomic guarantee as Render).
+func TestRenderShell_PresetDirMalformed(t *testing.T) {
+	presetDir := t.TempDir()
+	writeFile(t, filepath.Join(presetDir, "preset.json"), `{ "name": "x", "files": [] }`)
+	parent := t.TempDir()
+	roster := &config.Shell{
+		Spec: config.ShellSpec{
+			Host:          "app.dev.test",
+			ShellUpstream: "http://127.0.0.1:4200",
+			CDN:           config.ShellCDN{Host: "cdn.dev.test"},
+			UFEs:          []config.ShellUFE{{ID: "demo", Route: "demo", Upstream: "http://127.0.0.1:4201"}},
+		},
+	}
+	err := RenderShell(ShellParams{ParentDir: parent, Name: "app-shell", Roster: roster, PresetDir: presetDir})
+	if err == nil {
+		t.Fatal("expected error for empty files, got nil")
+	}
+	if !strings.Contains(err.Error(), `"files" is empty`) {
+		t.Errorf("error should name the malformed field: %v", err)
+	}
+	// The partial shell was removed.
+	if _, statErr := os.Stat(filepath.Join(parent, "app-shell")); !os.IsNotExist(statErr) {
+		t.Errorf("malformed shell preset left the partial shell behind (want removed): %v", statErr)
+	}
+}
+
+// TestRenderShell_PresetAndPresetDirExclusive verifies both flags together error.
+func TestRenderShell_PresetAndPresetDirExclusive(t *testing.T) {
+	parent := t.TempDir()
+	roster := &config.Shell{
+		Spec: config.ShellSpec{
+			Host: "app.dev.test", ShellUpstream: "http://127.0.0.1:4200",
+			CDN:  config.ShellCDN{Host: "cdn.dev.test"},
+			UFEs: []config.ShellUFE{{ID: "demo", Route: "demo", Upstream: "http://127.0.0.1:4201"}},
+		},
+	}
+	err := RenderShell(ShellParams{ParentDir: parent, Name: "app-shell", Roster: roster, Preset: "x", PresetDir: parent})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutually-exclusive error, got %v", err)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

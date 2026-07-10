@@ -69,7 +69,7 @@ func ufeCmd() *cobra.Command {
 // edge. It is the host-side companion of `de ufe new` (which scaffolds a uFE
 // and registers it into the roster).
 func ufeShellCmd() *cobra.Command {
-	var dir, shellFile, name string
+	var dir, shellFile, name, preset, presetDir string
 
 	cmd := &cobra.Command{
 		Use:   "shell",
@@ -88,10 +88,21 @@ matches the edge route 'de project up' creates to the shell host. Build + serve
 use npx (esbuild + sirv-cli), so no destructive install of a global toolchain is
 needed.
 
+Apply an overlay on top of the base shell with either:
+  --preset <name>      a built-in preset (the public CLI ships none)
+  --preset-dir <path>  a preset directory holding a canonical preset.json
+The public CLI ships no proprietary preset; the 'infoblox-cto-shell' preset (the
+Infoblox-branded commercial shell: Okta session + PDS chrome + the grouped
+INFOBLOX_GROUPS nav taxonomy) is provided by the private
+Infoblox-CTO/devedge-ufe-sdk-internal repo — apply it with --preset-dir
+<repo>/preset/infoblox-cto-shell. An unknown built-in preset or a
+missing/malformed preset.json fails with a clear error.
+
 Examples:
   de ufe shell
   de ufe shell --shell notesapp-shell.yaml --name notesapp-shell
-  de ufe shell --dir ./frontend`,
+  de ufe shell --dir ./frontend
+  de ufe shell --preset-dir ../devedge-ufe-sdk-internal/preset/infoblox-cto-shell`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			data, err := os.ReadFile(shellFile)
@@ -122,6 +133,8 @@ Examples:
 				ParentDir: dir,
 				Name:      name,
 				Roster:    roster,
+				Preset:    preset,
+				PresetDir: presetDir,
 			}); err != nil {
 				return err
 			}
@@ -137,6 +150,12 @@ Examples:
 			fmt.Fprintf(out, "\n%s %s\n", colorSuccess.Sprint("scaffolded shell"), colorHost.Sprint(name))
 			fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("host"), colorHost.Sprint(roster.Spec.Host))
 			fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("cdn"), colorHost.Sprint(roster.Spec.CDN.Host))
+			if preset != "" {
+				fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("preset"), colorHost.Sprint(preset))
+			}
+			if presetDir != "" {
+				fmt.Fprintf(out, "%s %s\n", colorLabel.Sprint("preset-dir"), colorHost.Sprint(presetDir))
+			}
 			for _, u := range roster.Spec.UFEs {
 				fmt.Fprintf(out, "%s %s %s %s\n",
 					colorLabel.Sprint("uFE"),
@@ -157,6 +176,9 @@ Examples:
 	cmd.Flags().StringVar(&dir, "dir", "", "parent directory to create the shell in (defaults to .)")
 	cmd.Flags().StringVar(&shellFile, "shell", defaultShellFile, "shell roster (kind: Shell) to scaffold the shell from")
 	cmd.Flags().StringVar(&name, "name", "", "shell project dir name (defaults to <roster name>-shell)")
+	cmd.Flags().StringVar(&preset, "preset", "", "built-in overlay preset to apply on top of the base shell (the public CLI ships none)")
+	cmd.Flags().StringVar(&presetDir, "preset-dir", "", "path to a preset directory (with a canonical preset.json) to overlay on top of the base shell — e.g. the private infoblox-cto-shell commercial preset")
+	cmd.MarkFlagsMutuallyExclusive("preset", "preset-dir")
 	return cmd
 }
 
