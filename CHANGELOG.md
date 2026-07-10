@@ -6,6 +6,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-09
+
+### Added
+
+- **`de ufe shell`** — scaffolds a runnable single-spa **shell** (root-config)
+  from a `shell.yaml` roster (the one `de ufe new` writes). This closes the
+  self-contained render loop: `de ufe new <x>` → `de ufe shell` → `pnpm start`
+  (uFE + shell) → `de project up` renders the uFE in a shell, with no copying of
+  the example shell. The generated shell has a persistent left **side-nav menu**
+  in the commercial `csp.root.ui` style — one item per roster uFE (title-cased
+  label), active-route highlighting, and the signed-in user in the header from
+  the shell-owned session — and each uFE mounts into a pre-created single-spa
+  element in the content area. It renders locally with a no-auth dev session
+  (flip `environment.useDevSession` for real OIDC), serves on the roster's
+  `shellUpstream` port via `npx esbuild` + `sirv`, and installs the open-core
+  SDK from GitHub Packages. A grouped nav taxonomy is what the commercial overlay
+  binds on top; the open shell ships a flat `Applications` section. `de ufe
+  shell` warns if the roster lists no uFEs.
+
+### Fixed
+
+- The `de ufe new` scaffold now composes with a shell out of the box (previously
+  a freshly scaffolded uFE would not load in a shell without hand-edits):
+  - the dev server binds IPv4 (`ng serve --host 127.0.0.1`) so the edge's
+    `127.0.0.1` roster upstream reaches it — on Node 22 + macOS `ng serve`'s
+    default `localhost` binds `[::1]`, so the edge got connection-refused → 502;
+  - webpack-dev-server `allowedHosts: 'all'`, so the `cdn.dev.test` edge Host is
+    not rejected with "Invalid Host header";
+  - `setPublicPath()` is guarded — `systemjs-webpack-interop` throws under a
+    shell's native `import()`, which aborted the module before the single-spa
+    lifecycles were exported (blank uFE).
+
 ## [0.15.2] - 2026-07-09
 
 ### Fixed
