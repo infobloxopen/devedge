@@ -14,8 +14,8 @@ import (
 // of a preset directory. A preset adds or overrides files on top of the base
 // scaffold; it never removes base files.
 //
-// Canonical schema (documented in presets/README.md so external presets — e.g.
-// the private Infoblox-CTO/devedge-ufe-sdk-internal repo — can conform):
+// Canonical schema (documented in presets/README.md so a downstream, out-of-tree
+// preset can conform):
 //
 //	{ "name": "string", "description": "string",
 //	  "files": [ { "path": "target/path/in/project", "template": "source/file/in/preset/dir" } ] }
@@ -24,11 +24,11 @@ import (
 // through the SAME template data as the base scaffold (AppID/Name/etc.), and
 // written to <project>/<path>, overriding any base file already at that path.
 //
-// The public devedge CLI ships NO proprietary preset. The `infoblox-cto`
-// preset (FeatureFlag-CRD chart, Infoblox design-system wiring, Okta OIDC
-// config) is provided by the private Infoblox-CTO/devedge-ufe-sdk-internal
-// repo and is applied with --preset-dir. This keeps zero Infoblox content in
-// the public repo while leaving a clean, coherent seam.
+// The public devedge CLI ships NO built-in preset. A preset is a downstream
+// extension point (a deploy chart, a design-system binding, an OIDC/session
+// config, and so on) that a consumer supplies out-of-tree and applies with
+// --preset-dir. This keeps the public repo a clean, coherent seam with no
+// bundled preset content.
 type PresetManifest struct {
 	// Name is the preset identifier.
 	Name string `json:"name"`
@@ -36,8 +36,8 @@ type PresetManifest struct {
 	Description string `json:"description"`
 	// ShellHost, when non-empty, overrides the create-default shell host (the
 	// public default is app.dev.test). It is DATA, not core code: the public
-	// open core never hardcodes a specific host beyond app.dev.test, and the
-	// private Infoblox-CTO preset sets this to csp.dev.test. It only affects a
+	// open core never hardcodes a specific host beyond app.dev.test; a
+	// downstream preset may set this to its own host. It only affects a
 	// shell created from scratch by `de ufe new` — an existing shell.yaml's
 	// host is never rewritten.
 	ShellHost string `json:"shellHost,omitempty"`
@@ -61,7 +61,7 @@ type PresetFile struct {
 // CLI intentionally ships none (only a README explaining the contract), so the
 // only built-in presets available here are those an operator places under it.
 // The directory always contains at least the contract README so the embed is
-// non-empty. Proprietary presets ship OUT-of-tree and are applied with
+// non-empty. Downstream presets ship OUT-of-tree and are applied with
 // --preset-dir.
 const presetsRoot = "presets"
 
@@ -87,7 +87,7 @@ func availablePresets() []string {
 
 // checkPresetExists returns a clear error if the named built-in preset is not
 // available. The public CLI ships none, so this points the caller at
-// --preset-dir for the proprietary infoblox-cto preset.
+// --preset-dir to overlay their own preset.
 func checkPresetExists(name string) error {
 	for _, p := range availablePresets() {
 		if p == name {
@@ -95,9 +95,8 @@ func checkPresetExists(name string) error {
 		}
 	}
 	return fmt.Errorf(
-		"unknown built-in preset %q; the infoblox-cto preset is provided by the "+
-			"private devedge-ufe-sdk-internal repo — apply it with "+
-			"--preset-dir <path-to-that-repo>/preset/infoblox-cto",
+		"unknown built-in preset %q; the public CLI ships no built-in preset — "+
+			"overlay your own with --preset-dir <path>",
 		name,
 	)
 }

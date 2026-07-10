@@ -11,8 +11,8 @@ There are two ways to apply a preset:
   CLI. The public `devedge` repo ships **none** (only this contract README), so
   any `--preset <name>` here fails with a clear error pointing at `--preset-dir`.
 - `de ufe new <name> --preset-dir <path>` — an **out-of-tree** preset directory
-  on disk holding a canonical `preset.json` (below). This is how proprietary
-  presets are applied.
+  on disk holding a canonical `preset.json` (below). This is the downstream
+  extension point: how a consumer overlays their own preset.
 
 ## Canonical `preset.json` schema
 
@@ -47,17 +47,16 @@ A missing or malformed `preset.json` — bad JSON, missing `name`, empty `files`
 or an entry missing `path`/`template` — fails loud with a clear message naming
 the offending field.
 
-## The public CLI ships NO proprietary preset
+## The public CLI ships NO built-in preset
 
-The public `devedge` repo intentionally contains **zero** Infoblox-specific
-content. The `infoblox-cto` preset — the FeatureFlag-CRD Helm chart, the
-Infoblox design-system wiring, and the Okta OIDC configuration — is provided by
-the private **`Infoblox-CTO/devedge-ufe-sdk-internal`** repo, exactly as
-`opaauthz` binds privately onto the public `authz.Authorizer` seam. Apply it
-with:
+The public `devedge` repo intentionally contains **zero** bundled preset
+content. A preset is a **downstream extension point** — a deploy chart, a
+design-system binding, an OIDC/session config, and so on — that a consumer
+supplies out-of-tree and overlays with `--preset-dir`, exactly as `opaauthz`
+binds privately onto the public `authz.Authorizer` seam. Apply it with:
 
 ```sh
-de ufe new <name> --preset-dir <path-to-that-repo>/preset/infoblox-cto
+de ufe new <name> --preset-dir <path-to-your-preset>
 ```
 
 That directory must ship a `preset.json` conforming to the canonical schema
