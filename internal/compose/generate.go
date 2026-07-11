@@ -18,7 +18,7 @@ import (
 // requires when it cannot be derived from a member module (the published case
 // with no local --path). It tracks the version `de` itself builds against; a real
 // composition SHOULD derive the pin from its members' go.mod (see Generate).
-const DefaultSDKVersion = "v0.50.0"
+const DefaultSDKVersion = "v0.61.0"
 
 // SDKVersion is the fallback devedge-sdk pin for the generated composed binary.
 // Kept for callers/tests; Generate now DERIVES the pin from the member modules'

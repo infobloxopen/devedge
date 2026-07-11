@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -160,13 +162,112 @@ func runGenerate(cmd *cobra.Command, dir string) error {
 		}
 	}
 
-	// 6. Tidy — generated imports may have changed the module graph.
+	// 6. Embed the generated full-text-search migrations (WS-041). An INDEXED
+	//    searchable resource makes the storage plugin emit a persisted
+	//    `search_vector` generated column + a CONCURRENTLY GIN index as SQL
+	//    migrations under the GIT-IGNORED gen/migrations/ — which is NOT the dir
+	//    the service embeds/applies (module/migrations/, committed). Copy them
+	//    into the embedded dir here so `//go:embed migrations` picks them up and
+	//    the host migrator applies them (otherwise an INDEXED resource hits
+	//    `column "search_vector" does not exist` at runtime). Path-independent:
+	//    runs inside `de generate` (and `de api publish`), so INDEXED full-text
+	//    search works end-to-end with no separate `make sync-migrations` step.
+	copied, err := syncGeneratedMigrations(dir)
+	if err != nil {
+		return err
+	}
+	for _, name := range copied {
+		fmt.Fprintf(out, "generate: embedded migration module/migrations/%s\n", name)
+	}
+
+	// 7. Tidy — generated imports may have changed the module graph.
 	fmt.Fprintf(out, "generate: go mod tidy\n")
 	if err := runTool(cmd, dir, nil, "go", "mod", "tidy"); err != nil {
 		return fmt.Errorf("go mod tidy: %w", err)
 	}
 	fmt.Fprintf(out, "%s\n", colorSuccess.Sprint("generate ok"))
 	return nil
+}
+
+// searchMigrationReservedBase mirrors the devedge-sdk storage plugin's reserved
+// base version for generated full-text-search migrations (protoc-gen-storage's
+// searchMigrationBaseVersion = 9001). Generated files use this band, far above a
+// service's hand-authored 0002+ domain migrations, so syncing them into the
+// embedded dir never clobbers — or is confused for — a hand-written migration.
+const searchMigrationReservedBase = 9001
+
+// syncGeneratedMigrations copies the full-text-search migrations the storage
+// plugin emits under <dir>/gen/migrations/ (git-ignored; WS-041 INDEXED
+// strategy) into the service module's committed, embedded migrations dir
+// (<dir>/module/migrations/), returning the basenames it (re)wrote. It is the
+// path-independent equivalent of the scaffold Makefile's `sync-migrations`
+// target, moved into `de generate` so INDEXED full-text search works end-to-end
+// with `de generate` alone.
+//
+// It is safe to run on every generate:
+//   - only files in the generator's reserved version band
+//     (searchMigrationReservedBase and above) are considered, so a hand-authored
+//     0002+ migration is never written into the embedded dir;
+//   - copies are content-compared, so an unchanged file is a no-op (idempotent);
+//   - it never deletes, so a migration you wrote is never touched.
+//
+// It is a no-op when there are no generated migrations (no INDEXED searchable
+// resource → no gen/migrations/ dir).
+func syncGeneratedMigrations(dir string) ([]string, error) {
+	srcDir := filepath.Join(dir, "gen", "migrations")
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // no generated migrations to sync
+		}
+		return nil, fmt.Errorf("scan %s: %w", srcDir, err)
+	}
+
+	dstDir := filepath.Join(dir, "module", "migrations")
+	var copied []string
+	dstReady := false
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".sql") || !isReservedMigration(name) {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(srcDir, name))
+		if err != nil {
+			return nil, fmt.Errorf("read generated migration %s: %w", name, err)
+		}
+		dst := filepath.Join(dstDir, name)
+		if existing, err := os.ReadFile(dst); err == nil && bytes.Equal(existing, body) {
+			continue // identical — nothing to do
+		}
+		if !dstReady {
+			if err := os.MkdirAll(dstDir, 0o755); err != nil {
+				return nil, fmt.Errorf("create %s: %w", dstDir, err)
+			}
+			dstReady = true
+		}
+		if err := os.WriteFile(dst, body, 0o644); err != nil {
+			return nil, fmt.Errorf("write embedded migration %s: %w", dst, err)
+		}
+		copied = append(copied, name)
+	}
+	return copied, nil
+}
+
+// isReservedMigration reports whether a migration filename's leading numeric
+// version is in the generator's reserved band (>= searchMigrationReservedBase).
+// Migration files are `<version>_<name>.<up|down>.sql`; a non-numeric or
+// below-band prefix (e.g. a hand-authored 0002_) is skipped so `de generate`
+// never writes a non-generated file into the embedded dir.
+func isReservedMigration(name string) bool {
+	i := strings.IndexByte(name, '_')
+	if i <= 0 {
+		return false
+	}
+	v, err := strconv.Atoi(name[:i])
+	if err != nil {
+		return false
+	}
+	return v >= searchMigrationReservedBase
 }
 
 // genPlan is the codegen plan resolved from a service's buf.gen.yaml.

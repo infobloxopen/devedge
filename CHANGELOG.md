@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-10
+
+### Added
+
+- **`de generate` embeds generated full-text-search migrations (WS-041).** An `INDEXED` searchable
+  resource makes the storage codegen emit a persisted `search_vector` generated column + a
+  `CONCURRENTLY` GIN index as SQL migrations under the git-ignored `gen/migrations/` — which is not
+  the dir a service embeds/applies (`module/migrations/`, committed). `de generate` now copies those
+  generated files (the reserved `9001+` band only) into the embedded `module/migrations/` dir, so
+  `//go:embed migrations` picks them up and the host migrator applies them. This makes `INDEXED`
+  full-text search work end-to-end via `de generate` alone — the previous `make sync-migrations`
+  step is no longer required. The copy is content-compared (idempotent), never clobbers a
+  hand-authored `0002+` migration, and is a no-op when there is nothing to sync. `de api publish`
+  gets the same behavior (it shares the codegen routine).
+
+### Changed
+
+- **Bumped the devedge-sdk the CLI builds against, and the composed-binary default SDK pin, to
+  `v0.61.0`** (which ships the full-text-search codegen). `de generate` pins the devedge-sdk codegen
+  plugins (`protoc-gen-storage`/`-ent`/`-svc`, `openapiv2to3`) to each service's own resolved
+  devedge-sdk version, so a service on `v0.61.0` now generates the `q` collection operator
+  (`ListOptions.Search` from `req.GetQ()`) and the Postgres `to_tsvector … websearch_to_tsquery`
+  predicate; on older SDKs the new `searchable` / `(infoblox.storage.v1.search)` annotations are
+  still parsed but silently ignored.
+- Genericized the commercial-UI references in the uFE scaffolds to a preset extension point (public
+  repo hygiene).
+
 ## [0.17.0] - 2026-07-09
 
 ### Added
@@ -536,5 +563,6 @@ Fixes from the DX hardening cadence (Runs 16–19). Requires devedge-sdk v0.52.0
   path now resolves correctly on the daemon side, fixing an ENOENT error that
   appeared during the onboarding walk-through.
 
-[Unreleased]: https://github.com/infobloxopen/devedge/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/infobloxopen/devedge/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/infobloxopen/devedge/compare/v0.17.0...v0.18.0
 [0.2.0]: https://github.com/infobloxopen/devedge/compare/v0.1.0...v0.2.0

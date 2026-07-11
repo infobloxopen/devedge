@@ -65,10 +65,12 @@ github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+l
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/infobloxopen/apis/proto/infoblox/field v1.0.0-alpha.3 h1:DtpOUmrhU8No79EYswX7+7DCSzu5o6gpUmVqT9PF6ug=
-github.com/infobloxopen/apis/proto/infoblox/field v1.0.0-alpha.3/go.mod h1:Cfo9T286fNQrHkVaOgpm23jxFcE08522nZjMnfJHQLY=
-github.com/infobloxopen/devedge-sdk v0.52.0 h1:ws+GFLmcqzBPWHVc2CNT4xuP0ZyVS97aXjghukv0tao=
-github.com/infobloxopen/devedge-sdk v0.52.0/go.mod h1:S41/triSUI88lB6smQsU1F709oeZb4HSPuvNPcD1p2k=
+github.com/infobloxopen/apis/proto/infoblox/field v1.0.0-alpha.5 h1:2S/EioF594/P6do4tqtrDBh0ih9d+OJXgmzkDoHLnas=
+github.com/infobloxopen/apis/proto/infoblox/field v1.0.0-alpha.5/go.mod h1:Cfo9T286fNQrHkVaOgpm23jxFcE08522nZjMnfJHQLY=
+github.com/infobloxopen/apis/proto/infoblox/storage v1.0.0-alpha.2 h1:MJiJhyGo2M4nm1BhDcu8hMPHB2OGm+lG/VgvoutuBHU=
+github.com/infobloxopen/apis/proto/infoblox/storage v1.0.0-alpha.2/go.mod h1:jPO84oxH4QgGedTEeYrgnLzCg96rlsDZoAp60JCsgkU=
+github.com/infobloxopen/devedge-sdk v0.61.0 h1:28wjanm38QTQtQRwr/5gTGxoH42SlUSDXL20gzRPJMU=
+github.com/infobloxopen/devedge-sdk v0.61.0/go.mod h1:wwf7NBuGXNd8/R9nOs/brw557tfC/46BmuCp8Ryax48=
 github.com/infobloxopen/migrate/v4 v4.16.3-0.20260414025640-b28cb3bc8342 h1:czuTABMCAjNP+qnBL8R7dOqUzdiyue7jj4iTVEkw5So=
 github.com/infobloxopen/migrate/v4 v4.16.3-0.20260414025640-b28cb3bc8342/go.mod h1:ybK2XA/O71eAdygbPEtHeheBw5FdEMnqWyPL6f32heY=
 github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=
