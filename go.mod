@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/fatih/color v1.18.0
-	github.com/infobloxopen/devedge-sdk v0.52.0
+	github.com/infobloxopen/devedge-sdk v0.61.0
 	github.com/lib/pq v1.10.9
 	github.com/miekg/dns v1.1.72
 	github.com/spf13/cobra v1.10.2
@@ -24,7 +24,8 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/infobloxopen/apis/proto/infoblox/field v1.0.0-alpha.3 // indirect
+	github.com/infobloxopen/apis/proto/infoblox/field v1.0.0-alpha.5 // indirect
+	github.com/infobloxopen/apis/proto/infoblox/storage v1.0.0-alpha.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/moby/spdystream v0.5.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect

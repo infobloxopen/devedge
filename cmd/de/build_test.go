@@ -98,6 +98,90 @@ func TestLintConfigured(t *testing.T) {
 	}
 }
 
+func TestSyncGeneratedMigrations(t *testing.T) {
+	dir := t.TempDir()
+	genMig := filepath.Join(dir, "gen", "migrations")
+	if err := os.MkdirAll(genMig, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The storage plugin emits reserved-band (9001+) files under gen/migrations/.
+	generated := map[string]string{
+		"9001_gizmos_search_vector.up.sql":   "ALTER TABLE gizmos ADD COLUMN search_vector tsvector;",
+		"9001_gizmos_search_vector.down.sql": "ALTER TABLE gizmos DROP COLUMN search_vector;",
+		"9002_gizmos_search_gin.up.sql":      "CREATE INDEX CONCURRENTLY ...;",
+		"9002_gizmos_search_gin.down.sql":    "DROP INDEX ...;",
+	}
+	for name, body := range generated {
+		if err := os.WriteFile(filepath.Join(genMig, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A stray below-band file in gen/migrations/ must be ignored (defensive: the
+	// embedded dir only ever receives generated reserved-band files).
+	if err := os.WriteFile(filepath.Join(genMig, "0002_handwritten.up.sql"), []byte("-- nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A hand-authored migration already living in the embedded dir must survive.
+	modMig := filepath.Join(dir, "module", "migrations")
+	if err := os.MkdirAll(modMig, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	handAuthored := filepath.Join(modMig, "0002_domain.up.sql")
+	if err := os.WriteFile(handAuthored, []byte("-- my domain table"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// First run copies exactly the four reserved-band generated files.
+	copied, err := syncGeneratedMigrations(dir)
+	if err != nil {
+		t.Fatalf("syncGeneratedMigrations: %v", err)
+	}
+	if len(copied) != 4 {
+		t.Fatalf("copied %d files, want 4: %v", len(copied), copied)
+	}
+	for name, want := range generated {
+		got, err := os.ReadFile(filepath.Join(modMig, name))
+		if err != nil {
+			t.Fatalf("generated migration %s not embedded: %v", name, err)
+		}
+		if string(got) != want {
+			t.Errorf("embedded %s = %q, want %q", name, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(modMig, "0002_handwritten.up.sql")); err == nil {
+		t.Error("below-band gen file must NOT be written into the embedded dir")
+	}
+	if got, _ := os.ReadFile(handAuthored); string(got) != "-- my domain table" {
+		t.Errorf("hand-authored migration was clobbered: %q", got)
+	}
+
+	// Second run is idempotent: identical content → nothing copied.
+	copied2, err := syncGeneratedMigrations(dir)
+	if err != nil {
+		t.Fatalf("syncGeneratedMigrations (2nd): %v", err)
+	}
+	if len(copied2) != 0 {
+		t.Errorf("second run should copy nothing, got: %v", copied2)
+	}
+}
+
+func TestSyncGeneratedMigrations_NoGenDir(t *testing.T) {
+	// A service with no INDEXED searchable resource has no gen/migrations/ — a
+	// clean no-op, and the embedded dir is never created.
+	dir := t.TempDir()
+	copied, err := syncGeneratedMigrations(dir)
+	if err != nil {
+		t.Fatalf("syncGeneratedMigrations: %v", err)
+	}
+	if copied != nil {
+		t.Errorf("no gen/migrations should copy nothing, got: %v", copied)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "module", "migrations")); err == nil {
+		t.Error("module/migrations must not be created when there is nothing to sync")
+	}
+}
+
 func TestResolveProjectDir(t *testing.T) {
 	if got, _ := resolveProjectDir("/some/dir"); got != "/some/dir" {
 		t.Errorf("explicit dir should win, got %q", got)
